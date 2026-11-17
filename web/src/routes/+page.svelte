@@ -1,0 +1,1091 @@
+<script lang="ts">
+	import { onMount } from 'svelte';
+	import { buildSandboxedEmailHtml } from '../lib/sanitize';
+
+	export let data: { userEmail?: string } = {};
+
+	interface EmailSummary {
+		id: string;
+		message_id: string | null;
+		in_reply_to: string | null;
+		references_header: string | null;
+		folder: 'inbox' | 'sent' | 'trash';
+		sender_name: string | null;
+		sender_email: string;
+		recipient_email: string;
+		subject: string;
+		snippet: string;
+		is_read: number;
+		created_at: string;
+	}
+
+	interface EmailDetail extends EmailSummary {
+		text_body: string;
+		html_body: string | null;
+	}
+
+	interface Attachment {
+		id: string;
+		filename: string;
+		content_type: string;
+		size_bytes: number;
+		r2_key: string | null;
+	}
+
+	let folder: 'inbox' | 'sent' | 'trash' = 'inbox';
+	let searchQuery = '';
+	let unreadOnly = false;
+	let emails: EmailSummary[] = [];
+	let unreadCount = 0;
+	let loadingList = false;
+	let bulkWorking = false;
+
+	let selectedEmail: EmailDetail | null = null;
+	let attachments: Attachment[] = [];
+	let loadingDetail = false;
+	let sanitizedSrcDoc = '';
+
+	// Compose / Reply Modal State
+	let showCompose = false;
+	let sending = false;
+	let composeError = '';
+	let fromAlias = 'canopus@ggacrux.ca';
+	let fromName = 'GGacrux';
+	let to = '';
+	let subject = '';
+	let textBody = '';
+	let inReplyTo: string | null = null;
+	let references: string | null = null;
+
+	// Toast & refs
+	let statusMessage = '';
+	let searchTimer: ReturnType<typeof setTimeout>;
+	let searchInputEl: HTMLInputElement;
+
+	$: userEmail = data?.userEmail || '*@ggacrux.ca';
+	$: visibleEmails = unreadOnly ? emails.filter((e) => e.is_read === 0) : emails;
+
+	function notify(msg: string) {
+		statusMessage = msg;
+		setTimeout(() => {
+			if (statusMessage === msg) statusMessage = '';
+		}, 3500);
+	}
+
+	async function loadEmails(silent = false) {
+		if (!silent) loadingList = true;
+		try {
+			const params = new URLSearchParams({ folder });
+			if (searchQuery.trim()) params.set('q', searchQuery.trim());
+
+			const res = await fetch(`/api/emails?${params.toString()}`);
+			if (!res.ok) throw new Error('Failed to load emails');
+			const payload = await res.json();
+			emails = payload.emails;
+			unreadCount = payload.unreadCount;
+		} catch (err) {
+			if (!silent) notify((err as Error).message);
+		} finally {
+			if (!silent) loadingList = false;
+		}
+	}
+
+	function handleSearchInput() {
+		clearTimeout(searchTimer);
+		searchTimer = setTimeout(() => {
+			loadEmails();
+		}, 250);
+	}
+
+	function switchFolder(nextFolder: 'inbox' | 'sent' | 'trash') {
+		folder = nextFolder;
+		unreadOnly = false;
+		selectedEmail = null;
+		attachments = [];
+		loadEmails();
+	}
+
+	async function selectEmail(item: EmailSummary) {
+		loadingDetail = true;
+		try {
+			const res = await fetch(`/api/emails/${item.id}`);
+			if (!res.ok) throw new Error('Failed to load message');
+			const payload = await res.json();
+			selectedEmail = payload.email;
+			attachments = payload.attachments || [];
+
+			if (selectedEmail?.html_body) {
+				sanitizedSrcDoc = buildSandboxedEmailHtml(selectedEmail.html_body);
+			} else {
+				sanitizedSrcDoc = '';
+			}
+
+			// Mark as read automatically if unread
+			if (item.is_read === 0) {
+				await fetch(`/api/emails/${item.id}`, {
+					method: 'PATCH',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({ is_read: 1 })
+				});
+				item.is_read = 1;
+				if (selectedEmail) selectedEmail = { ...selectedEmail, is_read: 1 };
+				emails = [...emails];
+				if (folder === 'inbox' && unreadCount > 0) unreadCount -= 1;
+			}
+		} catch (err) {
+			notify((err as Error).message);
+		} finally {
+			loadingDetail = false;
+		}
+	}
+
+	async function toggleRead(email: EmailDetail) {
+		const nextState = email.is_read === 1 ? 0 : 1;
+		await fetch(`/api/emails/${email.id}`, {
+			method: 'PATCH',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ is_read: nextState })
+		});
+		selectedEmail = { ...email, is_read: nextState };
+		await loadEmails(true);
+	}
+
+	async function markAllRead() {
+		const unreadItems = emails.filter((e) => e.is_read === 0);
+		if (unreadItems.length === 0 || bulkWorking) return;
+
+		bulkWorking = true;
+		try {
+			await Promise.all(
+				unreadItems.map((item) =>
+					fetch(`/api/emails/${item.id}`, {
+						method: 'PATCH',
+						headers: { 'Content-Type': 'application/json' },
+						body: JSON.stringify({ is_read: 1 })
+					})
+				)
+			);
+			if (selectedEmail) selectedEmail = { ...selectedEmail, is_read: 1 };
+			notify(`Marked ${unreadItems.length} message(s) as read`);
+			await loadEmails(true);
+		} catch {
+			notify('Failed to mark all as read');
+		} finally {
+			bulkWorking = false;
+		}
+	}
+
+	async function moveToFolder(id: string, targetFolder: 'inbox' | 'trash') {
+		await fetch(`/api/emails/${id}`, {
+			method: 'PATCH',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ folder: targetFolder })
+		});
+		selectedEmail = null;
+		attachments = [];
+		notify(targetFolder === 'trash' ? 'Moved to Trash' : 'Restored to Inbox');
+		await loadEmails();
+	}
+
+	async function permanentDelete(id: string) {
+		if (!confirm('Permanently delete this email and any stored attachments? This cannot be undone.')) {
+			return;
+		}
+		const res = await fetch(`/api/emails/${id}`, { method: 'DELETE' });
+		if (res.ok) {
+			selectedEmail = null;
+			attachments = [];
+			notify('Permanently deleted');
+			await loadEmails();
+		} else {
+			notify('Failed to delete email');
+		}
+	}
+
+	async function emptyTrash() {
+		if (folder !== 'trash' || emails.length === 0 || bulkWorking) return;
+		if (
+			!confirm(
+				`Permanently delete all ${emails.length} message(s) in Trash and their attachments? This cannot be undone.`
+			)
+		) {
+			return;
+		}
+
+		bulkWorking = true;
+		try {
+			await Promise.all(emails.map((item) => fetch(`/api/emails/${item.id}`, { method: 'DELETE' })));
+			selectedEmail = null;
+			attachments = [];
+			notify('Trash emptied');
+			await loadEmails();
+		} catch {
+			notify('Failed to empty Trash');
+		} finally {
+			bulkWorking = false;
+		}
+	}
+
+	function openCompose() {
+		composeError = '';
+		if (data?.userEmail && data.userEmail.toLowerCase().endsWith('@ggacrux.ca')) {
+			fromAlias = data.userEmail;
+		}
+		to = '';
+		subject = '';
+		textBody = '';
+		inReplyTo = null;
+		references = null;
+		showCompose = true;
+	}
+
+	function openReply(email: EmailDetail) {
+		composeError = '';
+		if (email.recipient_email?.toLowerCase().endsWith('@ggacrux.ca')) {
+			fromAlias = email.recipient_email;
+		} else if (data?.userEmail && data.userEmail.toLowerCase().endsWith('@ggacrux.ca')) {
+			fromAlias = data.userEmail;
+		}
+
+		to = email.folder === 'sent' ? email.recipient_email : email.sender_email;
+		subject = email.subject?.toLowerCase().startsWith('re:')
+			? email.subject
+			: `Re: ${email.subject || ''}`;
+		inReplyTo = email.message_id;
+		references = [email.references_header, email.message_id].filter(Boolean).join(' ') || null;
+
+		const quotedDate = new Date(
+			email.created_at.endsWith('Z') ? email.created_at : email.created_at + 'Z'
+		).toLocaleString();
+		const quotedText = (email.text_body || '')
+			.split('\n')
+			.map((line) => `> ${line}`)
+			.join('\n');
+		textBody = `\n\n--- On ${quotedDate}, ${email.sender_email} wrote: ---\n${quotedText}`;
+		showCompose = true;
+	}
+
+	async function sendEmail() {
+		composeError = '';
+		if (!to.trim() || !subject.trim()) {
+			composeError = 'Recipient and subject are required.';
+			return;
+		}
+		sending = true;
+		try {
+			const res = await fetch('/api/emails/send', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({
+					fromAlias,
+					fromName,
+					to,
+					subject,
+					text: textBody,
+					inReplyTo,
+					references
+				})
+			});
+			const payload = await res.json();
+			if (!res.ok) throw new Error(payload.message || 'Failed to send email');
+
+			showCompose = false;
+			notify('Email sent');
+			if (folder === 'sent') await loadEmails();
+		} catch (err) {
+			composeError = (err as Error).message;
+		} finally {
+			sending = false;
+		}
+	}
+
+	function handleKeydown(event: KeyboardEvent) {
+		const target = event.target as HTMLElement | null;
+		const isTyping =
+			target &&
+			(target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable);
+
+		if (event.key === 'Escape') {
+			if (showCompose) {
+				showCompose = false;
+			} else if (selectedEmail) {
+				selectedEmail = null;
+			}
+			return;
+		}
+
+		if (isTyping || showCompose || event.metaKey || event.ctrlKey || event.altKey) return;
+
+		if (event.key === 'c' || event.key === 'C') {
+			event.preventDefault();
+			openCompose();
+		} else if (event.key === '/') {
+			event.preventDefault();
+			searchInputEl?.focus();
+		} else if (event.key === 'r' || event.key === 'R') {
+			event.preventDefault();
+			loadEmails();
+			notify('Refreshed');
+		} else if ((event.key === 'Delete' || event.key === 'Backspace') && selectedEmail) {
+			event.preventDefault();
+			if (selectedEmail.folder !== 'trash') {
+				moveToFolder(selectedEmail.id, 'trash');
+			} else {
+				permanentDelete(selectedEmail.id);
+			}
+		}
+	}
+
+	function formatDate(iso: string): string {
+		const d = new Date(iso.endsWith('Z') ? iso : iso + 'Z');
+		const now = new Date();
+		if (d.toDateString() === now.toDateString()) {
+			return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+		}
+		return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+	}
+
+	function formatBytes(bytes: number): string {
+		if (bytes < 1024) return `${bytes} B`;
+		if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+		return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+	}
+
+	onMount(() => {
+		if (data?.userEmail && data.userEmail.toLowerCase().endsWith('@ggacrux.ca')) {
+			fromAlias = data.userEmail;
+		}
+		loadEmails();
+
+		// Auto-refresh inbox/folder every 30s when tab is active
+		const pollInterval = setInterval(() => {
+			if (!document.hidden && !showCompose) {
+				loadEmails(true);
+			}
+		}, 30000);
+
+		return () => clearInterval(pollInterval);
+	});
+</script>
+
+<svelte:window on:keydown={handleKeydown} />
+
+<svelte:head>
+	<title>GGacrux Mail {unreadCount > 0 ? `(${unreadCount})` : ''}</title>
+</svelte:head>
+
+<div class="app-shell">
+	<!-- Pane 1: Sidebar -->
+	<aside class="sidebar">
+		<div class="brand">
+			<span class="logo-dot"></span>
+			<strong>GGacrux Mail</strong>
+		</div>
+
+		<button class="btn-primary compose-btn" title="Compose (Shortcut: C)" on:click={openCompose}>
+			+ Compose
+		</button>
+
+		<nav class="nav-folders">
+			<button class:active={folder === 'inbox'} on:click={() => switchFolder('inbox')}>
+				<span>Inbox</span>
+				{#if unreadCount > 0}
+					<span class="badge">{unreadCount}</span>
+				{/if}
+			</button>
+			<button class:active={folder === 'sent'} on:click={() => switchFolder('sent')}>
+				<span>Sent</span>
+			</button>
+			<button class:active={folder === 'trash'} on:click={() => switchFolder('trash')}>
+				<span>Trash</span>
+			</button>
+		</nav>
+
+		<div class="sidebar-footer">
+			<span class="user-email" title={userEmail}>{userEmail}</span>
+			<a href="/cdn-cgi/access/logout" class="btn-logout">Log out</a>
+		</div>
+	</aside>
+
+	<!-- Pane 2: Message List -->
+	<section class="message-list-pane" class:hidden-mobile={selectedEmail !== null}>
+		<div class="list-header">
+			<input
+				bind:this={searchInputEl}
+				type="search"
+				placeholder="Search {folder}... (/)"
+				bind:value={searchQuery}
+				on:input={handleSearchInput}
+			/>
+			<button
+				class="btn-icon"
+				class:active-filter={unreadOnly}
+				title="Filter unread only"
+				on:click={() => (unreadOnly = !unreadOnly)}
+			>
+				Unread
+			</button>
+			<button class="btn-icon" title="Refresh (Shortcut: R)" on:click={() => loadEmails()}>
+				↻
+			</button>
+		</div>
+
+		{#if folder === 'inbox' && unreadCount > 0}
+			<div class="list-subbar">
+				<span>{unreadCount} unread</span>
+				<button class="btn-link" disabled={bulkWorking} on:click={markAllRead}>
+					{bulkWorking ? 'Updating...' : 'Mark all read'}
+				</button>
+			</div>
+		{:else if folder === 'trash' && emails.length > 0}
+			<div class="list-subbar">
+				<span>{emails.length} in Trash</span>
+				<button class="btn-link danger" disabled={bulkWorking} on:click={emptyTrash}>
+					{bulkWorking ? 'Emptying...' : 'Empty Trash'}
+				</button>
+			</div>
+		{/if}
+
+		{#if loadingList}
+			<div class="empty-state">Loading messages...</div>
+		{:else if visibleEmails.length === 0}
+			<div class="empty-state">
+				{unreadOnly ? `No unread messages in ${folder}.` : `No messages in ${folder}.`}
+			</div>
+		{:else}
+			<ul class="message-list">
+				{#each visibleEmails as item (item.id)}
+					<li>
+						<button
+							class="message-row"
+							class:unread={item.is_read === 0}
+							class:selected={selectedEmail?.id === item.id}
+							on:click={() => selectEmail(item)}
+						>
+							<div class="row-top">
+								<span class="party">
+									{folder === 'sent'
+										? `To: ${item.recipient_email}`
+										: item.sender_name || item.sender_email}
+								</span>
+								<span class="date">{formatDate(item.created_at)}</span>
+							</div>
+							<div class="subject">{item.subject || '(No Subject)'}</div>
+							<div class="snippet">{item.snippet || ''}</div>
+						</button>
+					</li>
+				{/each}
+			</ul>
+		{/if}
+	</section>
+
+	<!-- Pane 3: Reading Pane -->
+	<main class="reading-pane" class:hidden-mobile={selectedEmail === null}>
+		{#if loadingDetail}
+			<div class="empty-state">Loading conversation...</div>
+		{:else if !selectedEmail}
+			<div class="empty-state">Select a message to read</div>
+		{:else}
+			<div class="reading-toolbar">
+				<button class="btn-secondary mobile-back" on:click={() => (selectedEmail = null)}>
+					← Back
+				</button>
+				<div class="toolbar-actions">
+					<button class="btn-primary" on:click={() => selectedEmail && openReply(selectedEmail)}>
+						Reply
+					</button>
+					<button class="btn-secondary" on:click={() => selectedEmail && toggleRead(selectedEmail)}>
+						Mark {selectedEmail.is_read === 1 ? 'Unread' : 'Read'}
+					</button>
+					{#if selectedEmail.folder !== 'trash'}
+						<button
+							class="btn-secondary"
+							on:click={() => selectedEmail && moveToFolder(selectedEmail.id, 'trash')}
+						>
+							Trash
+						</button>
+					{:else}
+						<button
+							class="btn-secondary"
+							on:click={() => selectedEmail && moveToFolder(selectedEmail.id, 'inbox')}
+						>
+							Restore
+						</button>
+						<button
+							class="btn-danger"
+							on:click={() => selectedEmail && permanentDelete(selectedEmail.id)}
+						>
+							Permanent Delete
+						</button>
+					{/if}
+				</div>
+			</div>
+
+			<div class="email-header">
+				<h2>{selectedEmail.subject || '(No Subject)'}</h2>
+				<div class="meta-grid">
+					<div>
+						<strong>From:</strong>
+						{selectedEmail.sender_name
+							? `${selectedEmail.sender_name} <${selectedEmail.sender_email}>`
+							: selectedEmail.sender_email}
+					</div>
+					<div><strong>To:</strong> {selectedEmail.recipient_email}</div>
+					<div>
+						<strong>Date:</strong>
+						{new Date(
+							selectedEmail.created_at.endsWith('Z')
+								? selectedEmail.created_at
+								: selectedEmail.created_at + 'Z'
+						).toLocaleString()}
+					</div>
+				</div>
+
+				{#if attachments.length > 0}
+					<div class="attachments-bar">
+						{#each attachments as att (att.id)}
+							{#if att.r2_key}
+								<a class="attachment-chip" href="/api/attachments/{att.id}" download={att.filename}>
+									📎 {att.filename} ({formatBytes(att.size_bytes)})
+								</a>
+							{:else}
+								<span class="attachment-chip disabled" title="R2 storage not enabled">
+									📎 {att.filename} ({formatBytes(att.size_bytes)} — metadata only)
+								</span>
+							{/if}
+						{/each}
+					</div>
+				{/if}
+			</div>
+
+			<div class="email-body-container">
+				{#if sanitizedSrcDoc}
+					<iframe
+						title="Email content"
+						sandbox="allow-popups allow-popups-to-escape-sandbox"
+						srcdoc={sanitizedSrcDoc}
+					></iframe>
+				{:else}
+					<pre class="plain-body">{selectedEmail.text_body || '(Empty message)'}</pre>
+				{/if}
+			</div>
+		{/if}
+	</main>
+</div>
+
+<!-- Compose / Reply Modal -->
+{#if showCompose}
+	<div class="modal-backdrop" role="presentation" on:click|self={() => (showCompose = false)}>
+		<div class="modal">
+			<div class="modal-header">
+				<h3>{inReplyTo ? 'Reply' : 'New Message'}</h3>
+				<button class="btn-icon" on:click={() => (showCompose = false)}>✕</button>
+			</div>
+
+			<form on:submit|preventDefault={sendEmail}>
+				<div class="form-row">
+					<label for="fromAlias">From (@ggacrux.ca)</label>
+					<input id="fromAlias" type="email" bind:value={fromAlias} required />
+				</div>
+				<div class="form-row">
+					<label for="to">To</label>
+					<input id="to" type="email" placeholder="recipient@example.com" bind:value={to} required />
+				</div>
+				<div class="form-row">
+					<label for="subject">Subject</label>
+					<input id="subject" type="text" placeholder="Subject" bind:value={subject} required />
+				</div>
+				<div class="form-row">
+					<label for="body">Message</label>
+					<textarea id="body" rows="10" bind:value={textBody} required></textarea>
+				</div>
+
+				{#if composeError}
+					<div class="error-banner">{composeError}</div>
+				{/if}
+
+				<div class="modal-footer">
+					<button type="button" class="btn-secondary" on:click={() => (showCompose = false)}>
+						Cancel
+					</button>
+					<button type="submit" class="btn-primary" disabled={sending}>
+						{sending ? 'Sending...' : 'Send Email'}
+					</button>
+				</div>
+			</form>
+		</div>
+	</div>
+{/if}
+
+{#if statusMessage}
+	<div class="toast">{statusMessage}</div>
+{/if}
+
+<style>
+	:global(*) {
+		box-sizing: border-box;
+	}
+	:global(body) {
+		margin: 0;
+		font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+		color: #0f172a;
+		background: #f8fafc;
+	}
+
+	.app-shell {
+		display: grid;
+		grid-template-columns: 220px 340px 1fr;
+		height: 100vh;
+		overflow: hidden;
+	}
+
+	/* Sidebar */
+	.sidebar {
+		background: #0f172a;
+		color: #f8fafc;
+		padding: 16px;
+		display: flex;
+		flex-direction: column;
+		gap: 16px;
+		min-width: 0;
+	}
+	.brand {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		font-size: 16px;
+	}
+	.logo-dot {
+		width: 10px;
+		height: 10px;
+		border-radius: 50%;
+		background: #38bdf8;
+	}
+	.compose-btn {
+		width: 100%;
+		padding: 10px;
+		font-weight: 600;
+	}
+	.nav-folders {
+		display: flex;
+		flex-direction: column;
+		gap: 4px;
+	}
+	.nav-folders button {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		background: transparent;
+		border: none;
+		color: #cbd5e1;
+		padding: 10px 12px;
+		border-radius: 6px;
+		cursor: pointer;
+		font-size: 14px;
+		text-align: left;
+	}
+	.nav-folders button:hover {
+		background: #1e293b;
+		color: #fff;
+	}
+	.nav-folders button.active {
+		background: #2563eb;
+		color: #fff;
+		font-weight: 600;
+	}
+	.badge {
+		background: #38bdf8;
+		color: #0f172a;
+		font-size: 11px;
+		font-weight: 700;
+		padding: 2px 7px;
+		border-radius: 999px;
+	}
+	.sidebar-footer {
+		margin-top: auto;
+		padding-top: 12px;
+		border-top: 1px solid #1e293b;
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 8px;
+		font-size: 12px;
+		color: #94a3b8;
+	}
+	.user-email {
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+	.btn-logout {
+		flex-shrink: 0;
+		padding: 5px 10px;
+		border-radius: 5px;
+		background: #1e293b;
+		color: #e2e8f0;
+		text-decoration: none;
+		font-weight: 500;
+		transition: background 0.15s ease, color 0.15s ease;
+	}
+	.btn-logout:hover {
+		background: #dc2626;
+		color: #ffffff;
+	}
+
+	/* Message List */
+	.message-list-pane {
+		border-right: 1px solid #e2e8f0;
+		background: #fff;
+		display: flex;
+		flex-direction: column;
+		overflow: hidden;
+	}
+	.list-header {
+		padding: 12px;
+		border-bottom: 1px solid #e2e8f0;
+		display: flex;
+		gap: 6px;
+	}
+	.list-header input {
+		flex: 1;
+		min-width: 0;
+		padding: 8px 10px;
+		border: 1px solid #cbd5e1;
+		border-radius: 6px;
+		font-size: 14px;
+	}
+	.list-subbar {
+		padding: 6px 12px;
+		background: #f8fafc;
+		border-bottom: 1px solid #e2e8f0;
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		font-size: 12px;
+		color: #64748b;
+	}
+	.btn-link {
+		background: none;
+		border: none;
+		padding: 0;
+		font-size: 12px;
+		font-weight: 600;
+		color: #2563eb;
+		cursor: pointer;
+	}
+	.btn-link:hover {
+		text-decoration: underline;
+	}
+	.btn-link.danger {
+		color: #dc2626;
+	}
+	.btn-link:disabled {
+		opacity: 0.5;
+		cursor: default;
+	}
+	.message-list {
+		list-style: none;
+		margin: 0;
+		padding: 0;
+		overflow-y: auto;
+		flex: 1;
+	}
+	.message-row {
+		width: 100%;
+		text-align: left;
+		background: #fff;
+		border: none;
+		border-bottom: 1px solid #f1f5f9;
+		padding: 12px 14px;
+		cursor: pointer;
+		display: flex;
+		flex-direction: column;
+		gap: 4px;
+	}
+	.message-row:hover {
+		background: #f8fafc;
+	}
+	.message-row.selected {
+		background: #eff6ff;
+		border-left: 3px solid #2563eb;
+	}
+	.message-row.unread .party,
+	.message-row.unread .subject {
+		font-weight: 700;
+		color: #0f172a;
+	}
+	.row-top {
+		display: flex;
+		justify-content: space-between;
+		font-size: 13px;
+		color: #334155;
+	}
+	.party {
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+		max-width: 220px;
+	}
+	.date {
+		font-size: 12px;
+		color: #64748b;
+	}
+	.subject {
+		font-size: 14px;
+		color: #1e293b;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+	.snippet {
+		font-size: 12px;
+		color: #64748b;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	/* Reading Pane */
+	.reading-pane {
+		background: #fff;
+		display: flex;
+		flex-direction: column;
+		overflow: hidden;
+	}
+	.reading-toolbar {
+		padding: 12px 16px;
+		border-bottom: 1px solid #e2e8f0;
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		gap: 8px;
+	}
+	.toolbar-actions {
+		display: flex;
+		gap: 8px;
+		flex-wrap: wrap;
+	}
+	.email-header {
+		padding: 16px 20px;
+		border-bottom: 1px solid #e2e8f0;
+	}
+	.email-header h2 {
+		margin: 0 0 10px 0;
+		font-size: 18px;
+	}
+	.meta-grid {
+		font-size: 13px;
+		color: #475569;
+		display: flex;
+		flex-direction: column;
+		gap: 4px;
+	}
+	.attachments-bar {
+		margin-top: 12px;
+		display: flex;
+		gap: 8px;
+		flex-wrap: wrap;
+	}
+	.attachment-chip {
+		display: inline-block;
+		padding: 6px 10px;
+		background: #f1f5f9;
+		border: 1px solid #cbd5e1;
+		border-radius: 6px;
+		font-size: 12px;
+		color: #0f172a;
+		text-decoration: none;
+	}
+	.attachment-chip:hover {
+		background: #e2e8f0;
+	}
+	.attachment-chip.disabled {
+		color: #64748b;
+	}
+	.email-body-container {
+		flex: 1;
+		overflow: hidden;
+		display: flex;
+	}
+	.email-body-container iframe {
+		width: 100%;
+		height: 100%;
+		border: none;
+	}
+	.plain-body {
+		margin: 0;
+		padding: 20px;
+		white-space: pre-wrap;
+		font-family: inherit;
+		font-size: 14px;
+		line-height: 1.6;
+		overflow-y: auto;
+		width: 100%;
+	}
+	.empty-state {
+		margin: auto;
+		color: #64748b;
+		font-size: 14px;
+		padding: 24px;
+	}
+
+	/* Buttons */
+	.btn-primary {
+		background: #2563eb;
+		color: #fff;
+		border: none;
+		padding: 8px 14px;
+		border-radius: 6px;
+		cursor: pointer;
+		font-size: 13px;
+	}
+	.btn-primary:hover {
+		background: #1d4ed8;
+	}
+	.btn-secondary {
+		background: #f1f5f9;
+		color: #0f172a;
+		border: 1px solid #cbd5e1;
+		padding: 8px 12px;
+		border-radius: 6px;
+		cursor: pointer;
+		font-size: 13px;
+	}
+	.btn-secondary:hover {
+		background: #e2e8f0;
+	}
+	.btn-danger {
+		background: #dc2626;
+		color: #fff;
+		border: none;
+		padding: 8px 12px;
+		border-radius: 6px;
+		cursor: pointer;
+		font-size: 13px;
+	}
+	.btn-danger:hover {
+		background: #b91c1c;
+	}
+	.btn-icon {
+		background: #f1f5f9;
+		color: #0f172a;
+		border: 1px solid #cbd5e1;
+		border-radius: 6px;
+		padding: 6px 10px;
+		font-size: 12px;
+		cursor: pointer;
+	}
+	.btn-icon:hover {
+		background: #e2e8f0;
+	}
+	.btn-icon.active-filter {
+		background: #2563eb;
+		color: #fff;
+		border-color: #2563eb;
+		font-weight: 600;
+	}
+
+	/* Modal */
+	.modal-backdrop {
+		position: fixed;
+		inset: 0;
+		background: rgba(15, 23, 42, 0.5);
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		padding: 16px;
+		z-index: 50;
+	}
+	.modal {
+		background: #fff;
+		width: 100%;
+		max-width: 600px;
+		border-radius: 10px;
+		padding: 20px;
+		box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.15);
+	}
+	.modal-header {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		margin-bottom: 14px;
+	}
+	.modal-header h3 {
+		margin: 0;
+	}
+	.form-row {
+		display: flex;
+		flex-direction: column;
+		gap: 4px;
+		margin-bottom: 12px;
+	}
+	.form-row label {
+		font-size: 12px;
+		font-weight: 600;
+		color: #475569;
+	}
+	.form-row input,
+	.form-row textarea {
+		padding: 8px 10px;
+		border: 1px solid #cbd5e1;
+		border-radius: 6px;
+		font-size: 14px;
+		font-family: inherit;
+	}
+	.modal-footer {
+		display: flex;
+		justify-content: flex-end;
+		gap: 8px;
+		margin-top: 12px;
+	}
+	.error-banner {
+		background: #fee2e2;
+		color: #991b1b;
+		padding: 8px 12px;
+		border-radius: 6px;
+		font-size: 13px;
+	}
+	.toast {
+		position: fixed;
+		bottom: 20px;
+		right: 20px;
+		background: #0f172a;
+		color: #fff;
+		padding: 10px 16px;
+		border-radius: 8px;
+		font-size: 13px;
+		z-index: 60;
+	}
+
+	.mobile-back {
+		display: none;
+	}
+	@media (max-width: 900px) {
+		.app-shell {
+			grid-template-columns: 1fr;
+		}
+		.sidebar {
+			flex-direction: row;
+			align-items: center;
+			padding: 10px;
+		}
+		.nav-folders {
+			flex-direction: row;
+		}
+		.sidebar-footer {
+			margin-top: 0;
+			margin-left: auto;
+			padding-top: 0;
+			border-top: none;
+		}
+		.user-email {
+			display: none;
+		}
+		.hidden-mobile {
+			display: none;
+		}
+		.mobile-back {
+			display: inline-block;
+		}
+	}
+</style>

@@ -1,0 +1,19 @@
+# Dependencies
+node_modules/
+
+# SvelteKit & Vite build outputs
+.svelte-kit/
+build/
+dist/
+
+# Cloudflare Wrangler local state & secrets
+.wrangler/
+.dev.vars
+.env
+.env.*
+!.env.example
+
+# OS & Editor files
+.DS_Store
+Thumbs.db
+.vscode/

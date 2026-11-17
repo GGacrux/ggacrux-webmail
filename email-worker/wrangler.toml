@@ -1,0 +1,14 @@
+# email-worker/wrangler.toml
+name = "ggacrux-inbound-email"
+main = "src/index.ts"
+compatibility_date = "2026-01-01"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "ggacrux-mail-db"
+database_id = "3133d6c2-0b4d-4b5a-8f84-fe91176513b8"
+
+# Remove or comment out these 3 lines if you did NOT activate R2:
+[[r2_buckets]]
+binding = "ggacrux_attachments"
+bucket_name = "ggacrux-attachments"

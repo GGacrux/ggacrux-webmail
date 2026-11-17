@@ -1,0 +1,13 @@
+# web/wrangler.toml
+name = "ggacrux-webmail"
+compatibility_date = "2026-01-01"
+pages_build_output_dir = ".svelte-kit/cloudflare"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "ggacrux-mail-db"
+database_id = "3133d6c2-0b4d-4b5a-8f84-fe91176513b8"
+
+[[r2_buckets]]
+binding = "ggacrux_attachments"
+bucket_name = "ggacrux-attachments"
