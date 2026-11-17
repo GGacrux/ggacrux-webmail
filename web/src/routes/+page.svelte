@@ -172,6 +172,23 @@
 		}
 	}
 
+
+	async function bulkUpdate(action: 'read' | 'unread' | 'trash' | 'delete') {
+		if (!selectedIds.length || bulkWorking) return;
+		if (action === 'delete' && !confirm(`Permanently delete ${selectedIds.length} selected messages?`)) return;
+		bulkWorking = true;
+		try {
+			await Promise.all(selectedIds.map((id) => action === 'delete'
+				? fetch(`/api/emails/${id}`, { method: 'DELETE' })
+				: fetch(`/api/emails/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(action === 'trash' ? { folder: 'trash' } : { is_read: action === 'read' ? 1 : 0 }) })));
+			selectedIds = [];
+			if (selectedEmail && action === 'trash' && selectedIds.includes(selectedEmail.id)) selectedEmail = null;
+			await loadEmails();
+			notify('Bulk action complete');
+		} catch { notify('Some messages could not be updated'); }
+		finally { bulkWorking = false; }
+	}
+
 	async function toggleRead(email: EmailDetail) {
 		const nextState = email.is_read === 1 ? 0 : 1;
 		await fetch(`/api/emails/${email.id}`, {
@@ -301,6 +318,24 @@
 		showCompose = true;
 	}
 
+
+	function openReplyAll(email: EmailDetail) {
+		openReply(email);
+		const own = userEmail.toLowerCase();
+		const participants = [email.sender_email, email.recipient_email].filter((address) => address && address.toLowerCase() !== own);
+		to = [...new Set(participants)].join(', ');
+		showCcBcc = true;
+	}
+
+	function openForward(email: EmailDetail) {
+		composeError = '';
+		fromAlias = userEmail;
+		to = ''; cc = ''; bcc = '';
+		subject = email.subject.toLowerCase().startsWith('fwd:') ? email.subject : `Fwd: ${email.subject}`;
+		textBody = `\n\n---------- Forwarded message ----------\nFrom: ${email.sender_email}\nDate: ${new Date(email.created_at).toLocaleString()}\nSubject: ${email.subject}\nTo: ${email.recipient_email}\n\n${email.text_body || ''}`;
+		inReplyTo = null; references = null; showCompose = true; composeMinimized = false;
+	}
+
 	async function sendEmail() {
 		composeError = '';
 		if (!to.trim() || !subject.trim()) {
@@ -410,7 +445,7 @@
 		if (saved) { try { const draft = JSON.parse(saved); to = draft.to || ''; cc = draft.cc || ''; bcc = draft.bcc || ''; subject = draft.subject || ''; textBody = draft.textBody || ''; fromAlias = draft.fromAlias || userEmail; fromName = draft.fromName || fromName; } catch { localStorage.removeItem(draftKey); } }
 		loadEmails();
 		const draftTimer = setInterval(() => { if (showCompose) localStorage.setItem(draftKey, JSON.stringify({ to, cc, bcc, subject, textBody, fromAlias, fromName })); }, 800);
-		observer = new IntersectionObserver((entries) => { if (entries.some((entry) => entry.isIntersecting)) loadMore(); }, { root: document.querySelector('.message-list-pane'), rootMargin: '240px' });
+		observer = new IntersectionObserver((entries) => { if (entries.some((entry) => entry.isIntersecting)) loadMore(); }, { root: document.querySelector('.message-list'), rootMargin: '240px' });
 		if (sentinelEl) observer.observe(sentinelEl);
 
 		// Auto-refresh inbox/folder every 30s when tab is active
@@ -486,6 +521,14 @@
 			</button>
 		</div>
 
+		{#if selectedIds.length > 0}
+			<div class="list-subbar"><span>{selectedIds.length} selected</span>
+				<button class="btn-link" on:click={() => bulkUpdate('read')}>Mark read</button>
+				<button class="btn-link" on:click={() => bulkUpdate('unread')}>Mark unread</button>
+				<button class="btn-link danger" on:click={() => bulkUpdate('trash')}>Trash</button>
+				<button class="btn-link danger" on:click={() => bulkUpdate('delete')}>Delete permanently</button>
+			</div>
+		{/if}
 		{#if folder === 'inbox' && unreadCount > 0}
 			<div class="list-subbar">
 				<span>{unreadCount} unread</span>
@@ -511,7 +554,8 @@
 		{:else}
 			<ul class="message-list">
 				{#each visibleEmails as item (item.id)}
-					<li>
+					<li class="message-list-item">
+						<label class="select-message"><input type="checkbox" checked={selectedIds.includes(item.id)} on:change={(event) => { selectedIds = (event.currentTarget as HTMLInputElement).checked ? [...selectedIds, item.id] : selectedIds.filter((id) => id !== item.id); }} aria-label="Select message" /></label>
 						<button
 							class="message-row"
 							class:unread={item.is_read === 0}
@@ -534,7 +578,8 @@
 			</ul>
 			<div bind:this={sentinelEl} class="load-sentinel">
 				{#if loadingMore}<span>Loading more…</span>{:else if hasMore}<button class="btn-link" on:click={loadMore}>Load more ({Math.max(0, totalCount - emails.length)} remaining)</button>{:else}<span>All messages loaded</span>{/if}
-			</div>
+				</li>
+			</ul>
 		{/if}
 	</section>
 
@@ -550,9 +595,9 @@
 					← Back
 				</button>
 				<div class="toolbar-actions">
-					<button class="btn-primary" on:click={() => selectedEmail && openReply(selectedEmail)}>
-						Reply
-					</button>
+					<button class="btn-primary" on:click={() => selectedEmail && openReply(selectedEmail)}>Reply</button>
+					<button class="btn-secondary" on:click={() => selectedEmail && openReplyAll(selectedEmail)}>Reply all</button>
+					<button class="btn-secondary" on:click={() => selectedEmail && openForward(selectedEmail)}>Forward</button>
 					<button class="btn-secondary" on:click={() => selectedEmail && toggleRead(selectedEmail)}>
 						Mark {selectedEmail.is_read === 1 ? 'Unread' : 'Read'}
 					</button>
@@ -857,6 +902,9 @@
 		overflow-y: auto;
 		flex: 1;
 	}
+	.message-list-item { display:flex; align-items:stretch; border-bottom:1px solid #f1f5f9; }
+	.select-message { display:flex; align-items:flex-start; padding:18px 0 0 10px; }
+	.message-list-item .message-row { flex:1; }
 	.message-row {
 		width: 100%;
 		text-align: left;
