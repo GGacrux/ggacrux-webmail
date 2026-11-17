@@ -696,7 +696,7 @@
 				</div>
 				<div class="form-row">
 					<label for="to">To</label>
-					<input id="to" type="email" placeholder="recipient@example.com" bind:value={to} required />
+					<input id="to" type="text" placeholder="recipient@example.com (comma-separated)" bind:value={to} required />
 				</div>
 				<div class="form-row"><button type="button" class="btn-link" on:click={() => (showCcBcc = !showCcBcc)}>{showCcBcc ? 'Hide CC / BCC' : 'Add CC / BCC'}</button></div>
 				{#if showCcBcc}<div class="form-row"><label for="cc">CC</label><input id="cc" bind:value={cc} placeholder="Separate addresses with commas" /></div><div class="form-row"><label for="bcc">BCC</label><input id="bcc" bind:value={bcc} placeholder="Separate addresses with commas" /></div>{/if}
@@ -1120,6 +1120,8 @@
 	}
 	.modal.expanded { max-width: none; width: calc(100vw - 32px); height: calc(100vh - 32px); overflow-y: auto; }
 	.modal.minimized { position: fixed; right: 18px; bottom: 18px; width: min(360px, calc(100vw - 36px)); padding: 12px; }
+	.modal-backdrop:has(.modal.minimized) { background: transparent; pointer-events: none; align-items: flex-end; justify-content: flex-end; }
+	.modal-backdrop:has(.modal.minimized) .modal { pointer-events: auto; }
 	.compose-window-actions { display:flex; gap:6px; align-items:center; }
 	.skeleton-list { padding: 12px; display:grid; gap:10px; }
 	.skeleton-row { height:72px; border-radius:8px; background:linear-gradient(90deg,#f1f5f9,#e2e8f0,#f1f5f9); background-size:200% 100%; animation: shimmer 1.4s infinite; }
@@ -1187,6 +1189,7 @@
 		.modal-backdrop { padding: 0; align-items: stretch; }
 		.modal, .modal.expanded { width:100%; max-width:none; height:100%; border-radius:0; overflow-y:auto; }
 		.modal.minimized { right:10px; bottom:10px; height:auto; border-radius:10px; }
+		.modal-backdrop:has(.modal.minimized) { padding:0; }
 		.reading-toolbar { align-items:flex-start; flex-direction:column; }
 		.toolbar-actions { width:100%; }
 		.toolbar-actions button { flex:1; }
