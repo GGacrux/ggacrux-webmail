@@ -38,6 +38,13 @@
 	let emails: EmailSummary[] = [];
 	let unreadCount = 0;
 	let loadingList = false;
+	let loadingMore = false;
+	let hasMore = false;
+	let totalCount = 0;
+	let listOffset = 0;
+	let sentinelEl: HTMLDivElement;
+	let selectedIds: string[] = [];
+	let observer: IntersectionObserver | null = null;
 	let bulkWorking = false;
 
 	let selectedEmail: EmailDetail | null = null;
@@ -47,11 +54,17 @@
 
 	// Compose / Reply Modal State
 	let showCompose = false;
+	let composeMinimized = false;
+	let composeExpanded = false;
+	let showCcBcc = false;
 	let sending = false;
 	let composeError = '';
 	let fromAlias = 'canopus@ggacrux.ca';
 	let fromName = 'GGacrux';
 	let to = '';
+	let cc = '';
+	let bcc = '';
+	let draftKey = 'ggacrux-mail-draft-v1';
 	let subject = '';
 	let textBody = '';
 	let inReplyTo: string | null = null;
@@ -62,7 +75,7 @@
 	let searchTimer: ReturnType<typeof setTimeout>;
 	let searchInputEl: HTMLInputElement;
 
-	$: userEmail = data?.userEmail || '*@ggacrux.ca';
+	$: userEmail = data?.userEmail || '';
 	$: visibleEmails = unreadOnly ? emails.filter((e) => e.is_read === 0) : emails;
 
 	function notify(msg: string) {
@@ -73,21 +86,40 @@
 	}
 
 	async function loadEmails(silent = false) {
-		if (!silent) loadingList = true;
+		if (!silent) { loadingList = true; listOffset = 0; }
 		try {
-			const params = new URLSearchParams({ folder });
+			const params = new URLSearchParams({ folder, limit: '25', offset: '0' });
 			if (searchQuery.trim()) params.set('q', searchQuery.trim());
-
-			const res = await fetch(`/api/emails?${params.toString()}`);
+			const res = await fetch(`/api/emails?${params}`);
 			if (!res.ok) throw new Error('Failed to load emails');
 			const payload = await res.json();
-			emails = payload.emails;
+			if (silent) {
+				const fresh = payload.emails as EmailSummary[];
+				const known = new Set(emails.map((item) => item.id));
+				emails = [...fresh, ...emails.filter((item) => !known.has(item.id))];
+			} else { emails = payload.emails; listOffset = payload.emails.length; }
 			unreadCount = payload.unreadCount;
-		} catch (err) {
-			if (!silent) notify((err as Error).message);
-		} finally {
-			if (!silent) loadingList = false;
-		}
+			totalCount = payload.totalCount;
+			hasMore = payload.hasMore;
+		} catch (err) { if (!silent) notify((err as Error).message); }
+		finally { if (!silent) loadingList = false; }
+	}
+
+	async function loadMore() {
+		if (loadingMore || !hasMore) return;
+		loadingMore = true;
+		try {
+			const params = new URLSearchParams({ folder, limit: '25', offset: String(listOffset) });
+			if (searchQuery.trim()) params.set('q', searchQuery.trim());
+			const res = await fetch(`/api/emails?${params}`);
+			if (!res.ok) throw new Error('Failed to load more messages');
+			const payload = await res.json();
+			emails = [...emails, ...payload.emails.filter((item: EmailSummary) => !emails.some((old) => old.id === item.id))];
+			listOffset += payload.emails.length;
+			hasMore = payload.hasMore;
+			totalCount = payload.totalCount;
+		} catch (err) { notify((err as Error).message); }
+		finally { loadingMore = false; }
 	}
 
 	function handleSearchInput() {
@@ -102,6 +134,7 @@
 		unreadOnly = false;
 		selectedEmail = null;
 		attachments = [];
+		selectedIds = [];
 		loadEmails();
 	}
 
@@ -228,12 +261,15 @@
 
 	function openCompose() {
 		composeError = '';
-		if (data?.userEmail && data.userEmail.toLowerCase().endsWith('@ggacrux.ca')) {
-			fromAlias = data.userEmail;
-		}
+		if (userEmail) fromAlias = userEmail;
 		to = '';
+		cc = '';
+		bcc = '';
 		subject = '';
 		textBody = '';
+		composeMinimized = false;
+		composeExpanded = false;
+		showCcBcc = false;
 		inReplyTo = null;
 		references = null;
 		showCompose = true;
@@ -282,6 +318,8 @@
 					to,
 					subject,
 					text: textBody,
+					cc,
+					bcc,
 					inReplyTo,
 					references
 				})
@@ -290,6 +328,8 @@
 			if (!res.ok) throw new Error(payload.message || 'Failed to send email');
 
 			showCompose = false;
+			localStorage.removeItem(draftKey);
+			to = ''; cc = ''; subject = ''; textBody = '';
 			notify('Email sent');
 			if (folder === 'sent') await loadEmails();
 		} catch (err) {
@@ -307,7 +347,7 @@
 
 		if (event.key === 'Escape') {
 			if (showCompose) {
-				showCompose = false;
+				composeMinimized = true;
 			} else if (selectedEmail) {
 				selectedEmail = null;
 			}
@@ -326,6 +366,16 @@
 			event.preventDefault();
 			loadEmails();
 			notify('Refreshed');
+		} else if (event.key === 'ArrowDown' || event.key.toLowerCase() === 'j') {
+			event.preventDefault();
+			const index = visibleEmails.findIndex((item) => item.id === selectedEmail?.id);
+			const next = visibleEmails[Math.min(index + 1, visibleEmails.length - 1)];
+			if (next) selectEmail(next);
+		} else if (event.key === 'ArrowUp' || event.key.toLowerCase() === 'k') {
+			event.preventDefault();
+			const index = visibleEmails.findIndex((item) => item.id === selectedEmail?.id);
+			const next = visibleEmails[Math.max(index - 1, 0)];
+			if (next) selectEmail(next);
 		} else if ((event.key === 'Delete' || event.key === 'Backspace') && selectedEmail) {
 			event.preventDefault();
 			if (selectedEmail.folder !== 'trash') {
@@ -355,7 +405,13 @@
 		if (data?.userEmail && data.userEmail.toLowerCase().endsWith('@ggacrux.ca')) {
 			fromAlias = data.userEmail;
 		}
+		if (userEmail) fromAlias = userEmail;
+		const saved = localStorage.getItem(draftKey);
+		if (saved) { try { const draft = JSON.parse(saved); to = draft.to || ''; cc = draft.cc || ''; bcc = draft.bcc || ''; subject = draft.subject || ''; textBody = draft.textBody || ''; fromAlias = draft.fromAlias || userEmail; fromName = draft.fromName || fromName; } catch { localStorage.removeItem(draftKey); } }
 		loadEmails();
+		const draftTimer = setInterval(() => { if (showCompose) localStorage.setItem(draftKey, JSON.stringify({ to, cc, bcc, subject, textBody, fromAlias, fromName })); }, 800);
+		observer = new IntersectionObserver((entries) => { if (entries.some((entry) => entry.isIntersecting)) loadMore(); }, { root: document.querySelector('.message-list-pane'), rootMargin: '240px' });
+		if (sentinelEl) observer.observe(sentinelEl);
 
 		// Auto-refresh inbox/folder every 30s when tab is active
 		const pollInterval = setInterval(() => {
@@ -364,7 +420,7 @@
 			}
 		}, 30000);
 
-		return () => clearInterval(pollInterval);
+		return () => { clearInterval(pollInterval); clearInterval(draftTimer); observer?.disconnect(); };
 	});
 </script>
 
@@ -447,7 +503,7 @@
 		{/if}
 
 		{#if loadingList}
-			<div class="empty-state">Loading messages...</div>
+			<div class="skeleton-list" aria-label="Loading messages">{#each Array(6) as _}<div class="skeleton-row"></div>{/each}</div>
 		{:else if visibleEmails.length === 0}
 			<div class="empty-state">
 				{unreadOnly ? `No unread messages in ${folder}.` : `No messages in ${folder}.`}
@@ -476,6 +532,9 @@
 					</li>
 				{/each}
 			</ul>
+			<div bind:this={sentinelEl} class="load-sentinel">
+				{#if loadingMore}<span>Loading more…</span>{:else if hasMore}<button class="btn-link" on:click={loadMore}>Load more ({Math.max(0, totalCount - emails.length)} remaining)</button>{:else}<span>All messages loaded</span>{/if}
+			</div>
 		{/if}
 	</section>
 
@@ -575,22 +634,28 @@
 
 <!-- Compose / Reply Modal -->
 {#if showCompose}
-	<div class="modal-backdrop" role="presentation" on:click|self={() => (showCompose = false)}>
-		<div class="modal">
+	<div class="modal-backdrop" role="presentation">
+		<div class="modal" class:expanded={composeExpanded} class:minimized={composeMinimized}>
 			<div class="modal-header">
 				<h3>{inReplyTo ? 'Reply' : 'New Message'}</h3>
-				<button class="btn-icon" on:click={() => (showCompose = false)}>✕</button>
+				<div class="compose-window-actions"><button type="button" class="btn-icon" on:click={() => (composeMinimized = !composeMinimized)}>{composeMinimized ? 'Restore' : '—'}</button><button type="button" class="btn-icon" on:click={() => (composeExpanded = !composeExpanded)}>{composeExpanded ? 'Shrink' : 'Expand'}</button><button type="button" class="btn-icon" on:click={() => { if (confirm('Discard this draft?')) { localStorage.removeItem(draftKey); showCompose = false; } }}>Discard</button></div>
 			</div>
 
+			{#if !composeMinimized}
 			<form on:submit|preventDefault={sendEmail}>
 				<div class="form-row">
 					<label for="fromAlias">From (@ggacrux.ca)</label>
 					<input id="fromAlias" type="email" bind:value={fromAlias} required />
 				</div>
 				<div class="form-row">
+					<label for="fromName">From name</label><input id="fromName" bind:value={fromName} />
+				</div>
+				<div class="form-row">
 					<label for="to">To</label>
 					<input id="to" type="email" placeholder="recipient@example.com" bind:value={to} required />
 				</div>
+				<div class="form-row"><button type="button" class="btn-link" on:click={() => (showCcBcc = !showCcBcc)}>{showCcBcc ? 'Hide CC / BCC' : 'Add CC / BCC'}</button></div>
+				{#if showCcBcc}<div class="form-row"><label for="cc">CC</label><input id="cc" bind:value={cc} placeholder="Separate addresses with commas" /></div><div class="form-row"><label for="bcc">BCC</label><input id="bcc" bind:value={bcc} placeholder="Separate addresses with commas" /></div>{/if}
 				<div class="form-row">
 					<label for="subject">Subject</label>
 					<input id="subject" type="text" placeholder="Subject" bind:value={subject} required />
@@ -605,14 +670,13 @@
 				{/if}
 
 				<div class="modal-footer">
-					<button type="button" class="btn-secondary" on:click={() => (showCompose = false)}>
-						Cancel
-					</button>
+					<button type="button" class="btn-secondary" on:click={() => (composeMinimized = true)}>Minimize</button>
 					<button type="submit" class="btn-primary" disabled={sending}>
 						{sending ? 'Sending...' : 'Send Email'}
 					</button>
 				</div>
 			</form>
+			{/if}
 		</div>
 	</div>
 {/if}
@@ -632,6 +696,9 @@
 		background: #f8fafc;
 	}
 
+	:global(:focus-visible) { outline: 3px solid #60a5fa; outline-offset: 2px; }
+	:global(::-webkit-scrollbar) { width: 10px; height: 10px; }
+	:global(::-webkit-scrollbar-thumb) { background: #94a3b8; border: 2px solid transparent; background-clip: padding-box; border-radius: 999px; }
 	.app-shell {
 		display: grid;
 		grid-template-columns: 220px 340px 1fr;
@@ -1004,6 +1071,13 @@
 		padding: 20px;
 		box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.15);
 	}
+	.modal.expanded { max-width: none; width: calc(100vw - 32px); height: calc(100vh - 32px); overflow-y: auto; }
+	.modal.minimized { position: fixed; right: 18px; bottom: 18px; width: min(360px, calc(100vw - 36px)); padding: 12px; }
+	.compose-window-actions { display:flex; gap:6px; align-items:center; }
+	.skeleton-list { padding: 12px; display:grid; gap:10px; }
+	.skeleton-row { height:72px; border-radius:8px; background:linear-gradient(90deg,#f1f5f9,#e2e8f0,#f1f5f9); background-size:200% 100%; animation: shimmer 1.4s infinite; }
+	@keyframes shimmer { to { background-position-x:-200%; } }
+	.load-sentinel { min-height:42px; display:flex; align-items:center; justify-content:center; color:#64748b; font-size:12px; }
 	.modal-header {
 		display: flex;
 		justify-content: space-between;
@@ -1061,6 +1135,15 @@
 		display: none;
 	}
 	@media (max-width: 900px) {
+		.app-shell { height: 100dvh; }
+		.sidebar { overflow-x:auto; }
+		.modal-backdrop { padding: 0; align-items: stretch; }
+		.modal, .modal.expanded { width:100%; max-width:none; height:100%; border-radius:0; overflow-y:auto; }
+		.modal.minimized { right:10px; bottom:10px; height:auto; border-radius:10px; }
+		.reading-toolbar { align-items:flex-start; flex-direction:column; }
+		.toolbar-actions { width:100%; }
+		.toolbar-actions button { flex:1; }
+
 		.app-shell {
 			grid-template-columns: 1fr;
 		}
