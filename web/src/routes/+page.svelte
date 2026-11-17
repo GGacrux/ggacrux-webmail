@@ -65,6 +65,7 @@
 	let cc = '';
 	let bcc = '';
 	let draftKey = 'ggacrux-mail-draft-v1';
+	let restoredDraft = false;
 	let subject = '';
 	let textBody = '';
 	let inReplyTo: string | null = null;
@@ -283,11 +284,7 @@
 			fromAlias = userEmail;
 			if (!fromName || fromName === 'GGacrux') fromName = userEmail.split('@')[0].replace(/[._-]+/g, ' ');
 		}
-		to = '';
-		cc = '';
-		bcc = '';
-		subject = '';
-		textBody = '';
+		if (!restoredDraft) { to = ''; cc = ''; bcc = ''; subject = ''; textBody = ''; }
 		composeMinimized = false;
 		composeExpanded = false;
 		showCcBcc = false;
@@ -368,7 +365,8 @@
 
 			showCompose = false;
 			localStorage.removeItem(draftKey);
-			to = ''; cc = ''; subject = ''; textBody = '';
+			restoredDraft = false;
+			to = ''; cc = ''; bcc = ''; subject = ''; textBody = '';
 			notify('Email sent');
 			if (folder === 'sent') await loadEmails();
 		} catch (err) {
@@ -446,7 +444,7 @@
 		}
 		if (userEmail) fromAlias = userEmail;
 		const saved = localStorage.getItem(draftKey);
-		if (saved) { try { const draft = JSON.parse(saved); to = draft.to || ''; cc = draft.cc || ''; bcc = draft.bcc || ''; subject = draft.subject || ''; textBody = draft.textBody || ''; fromAlias = draft.fromAlias || userEmail; fromName = draft.fromName || fromName; } catch { localStorage.removeItem(draftKey); } }
+		if (saved) { try { const draft = JSON.parse(saved); to = draft.to || ''; cc = draft.cc || ''; bcc = draft.bcc || ''; subject = draft.subject || ''; textBody = draft.textBody || ''; fromAlias = draft.fromAlias || userEmail; fromName = draft.fromName || fromName; restoredDraft = true; } catch { localStorage.removeItem(draftKey); } }
 		const draftTimer = setInterval(() => { if (showCompose) localStorage.setItem(draftKey, JSON.stringify({ to, cc, bcc, subject, textBody, fromAlias, fromName })); }, 800);
 		observer = new IntersectionObserver((entries) => { if (entries.some((entry) => entry.isIntersecting)) loadMore(); }, { root: null, rootMargin: '240px' });
 		loadEmails().then(() => { if (sentinelEl) observer?.observe(sentinelEl); });
@@ -685,7 +683,7 @@
 		<div class="modal" class:expanded={composeExpanded} class:minimized={composeMinimized}>
 			<div class="modal-header">
 				<h3>{inReplyTo ? 'Reply' : 'New Message'}</h3>
-				<div class="compose-window-actions"><button type="button" class="btn-icon" on:click={() => (composeMinimized = !composeMinimized)}>{composeMinimized ? 'Restore' : '—'}</button><button type="button" class="btn-icon" on:click={() => (composeExpanded = !composeExpanded)}>{composeExpanded ? 'Shrink' : 'Expand'}</button><button type="button" class="btn-icon" on:click={() => { if (confirm('Discard this draft?')) { localStorage.removeItem(draftKey); showCompose = false; } }}>Discard</button></div>
+				<div class="compose-window-actions"><button type="button" class="btn-icon" on:click={() => (composeMinimized = !composeMinimized)}>{composeMinimized ? 'Restore' : '—'}</button><button type="button" class="btn-icon" on:click={() => (composeExpanded = !composeExpanded)}>{composeExpanded ? 'Shrink' : 'Expand'}</button><button type="button" class="btn-icon" on:click={() => { if (confirm('Discard this draft?')) { localStorage.removeItem(draftKey); restoredDraft = false; to = ''; cc = ''; bcc = ''; subject = ''; textBody = ''; showCompose = false; } }}>Discard</button></div>
 			</div>
 
 			{#if !composeMinimized}
