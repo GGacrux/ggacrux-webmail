@@ -1,7 +1,5 @@
 import type { LayoutServerLoad } from './$types';
 
-export const load: LayoutServerLoad = async ({ locals }) => {
-	return {
-		userEmail: locals.userEmail ?? '*@ggacrux.ca'
-	};
-};
+export const load: LayoutServerLoad = async ({ locals }) => ({
+	userEmail: locals.userEmail ?? null
+});
