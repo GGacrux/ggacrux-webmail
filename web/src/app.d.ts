@@ -4,10 +4,13 @@ import type { D1Database, R2Bucket } from '@cloudflare/workers-types';
 
 declare global {
 	namespace App {
-		interface Platform {
+		interface Locals {
+		userEmail?: string;
+	}
+	interface Platform {
 			env: {
 				DB: D1Database;
-				BUCKET?: R2Bucket;
+				ggacrux_attachments: R2Bucket;
 				RESEND_API_KEY: string;
 			};
 		}
