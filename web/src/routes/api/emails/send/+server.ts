@@ -31,8 +31,8 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	const bcc = recipients(payload.bcc);
 	if (!to.length || !payload.subject?.trim()) throw error(400, 'Recipient (to) and subject are required');
 	const senderEmail = (payload.fromAlias || locals.userEmail || '').trim().toLowerCase();
-	if (!/^[^\\s@]+@ggacrux\\.ca$/.test(senderEmail)) throw error(400, 'Choose a valid @ggacrux.ca sender alias');
-	const senderName = (payload.fromName || senderEmail.split('@')[0]).trim().replace(/[\\r\\n<>]/g, '').slice(0, 100);
+	if (!/^[^\s@]+@ggacrux\.ca$/.test(senderEmail)) throw error(400, 'Choose a valid @ggacrux.ca sender alias');
+	const senderName = (payload.fromName || senderEmail.split('@')[0]).trim().replace(/[\r\n<>]/g, '').slice(0, 100);
 	const headers: Record<string, string> = {};
 	let updatedReferences: string | null = null;
 	if (payload.inReplyTo) {
