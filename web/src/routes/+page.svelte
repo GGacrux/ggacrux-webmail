@@ -279,7 +279,10 @@
 
 	function openCompose() {
 		composeError = '';
-		if (userEmail) fromAlias = userEmail;
+		if (userEmail) {
+			fromAlias = userEmail;
+			if (!fromName || fromName === 'GGacrux') fromName = userEmail.split('@')[0].replace(/[._-]+/g, ' ');
+		}
 		to = '';
 		cc = '';
 		bcc = '';
