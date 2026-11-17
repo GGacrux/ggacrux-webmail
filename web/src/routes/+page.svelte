@@ -178,11 +178,12 @@
 		if (action === 'delete' && !confirm(`Permanently delete ${selectedIds.length} selected messages?`)) return;
 		bulkWorking = true;
 		try {
-			await Promise.all(selectedIds.map((id) => action === 'delete'
+			const idsToUpdate = [...selectedIds];
+		await Promise.all(idsToUpdate.map((id) => action === 'delete'
 				? fetch(`/api/emails/${id}`, { method: 'DELETE' })
 				: fetch(`/api/emails/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(action === 'trash' ? { folder: 'trash' } : { is_read: action === 'read' ? 1 : 0 }) })));
+			if (selectedEmail && idsToUpdate.includes(selectedEmail.id) && (action === 'trash' || action === 'delete')) selectedEmail = null;
 			selectedIds = [];
-			if (selectedEmail && action === 'trash' && selectedIds.includes(selectedEmail.id)) selectedEmail = null;
 			await loadEmails();
 			notify('Bulk action complete');
 		} catch { notify('Some messages could not be updated'); }
@@ -443,10 +444,9 @@
 		if (userEmail) fromAlias = userEmail;
 		const saved = localStorage.getItem(draftKey);
 		if (saved) { try { const draft = JSON.parse(saved); to = draft.to || ''; cc = draft.cc || ''; bcc = draft.bcc || ''; subject = draft.subject || ''; textBody = draft.textBody || ''; fromAlias = draft.fromAlias || userEmail; fromName = draft.fromName || fromName; } catch { localStorage.removeItem(draftKey); } }
-		loadEmails();
 		const draftTimer = setInterval(() => { if (showCompose) localStorage.setItem(draftKey, JSON.stringify({ to, cc, bcc, subject, textBody, fromAlias, fromName })); }, 800);
-		observer = new IntersectionObserver((entries) => { if (entries.some((entry) => entry.isIntersecting)) loadMore(); }, { root: document.querySelector('.message-list'), rootMargin: '240px' });
-		if (sentinelEl) observer.observe(sentinelEl);
+		observer = new IntersectionObserver((entries) => { if (entries.some((entry) => entry.isIntersecting)) loadMore(); }, { root: null, rootMargin: '240px' });
+		loadEmails().then(() => { if (sentinelEl) observer?.observe(sentinelEl); });
 
 		// Auto-refresh inbox/folder every 30s when tab is active
 		const pollInterval = setInterval(() => {
@@ -575,9 +575,8 @@
 						</button>
 					</li>
 				{/each}
-			</ul>
-			<div bind:this={sentinelEl} class="load-sentinel">
-				{#if loadingMore}<span>Loading more…</span>{:else if hasMore}<button class="btn-link" on:click={loadMore}>Load more ({Math.max(0, totalCount - emails.length)} remaining)</button>{:else}<span>All messages loaded</span>{/if}
+				<li bind:this={sentinelEl} class="load-sentinel">
+					{#if loadingMore}<span>Loading more…</span>{:else if hasMore}<button class="btn-link" on:click={loadMore}>Load more ({Math.max(0, totalCount - emails.length)} remaining)</button>{:else}<span>All messages loaded</span>{/if}
 				</li>
 			</ul>
 		{/if}
