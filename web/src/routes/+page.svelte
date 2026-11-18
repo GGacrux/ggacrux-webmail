@@ -72,6 +72,8 @@
 	let restoredDraft = false;
 	let quickLinks: { id: string; title: string; url: string }[] = [];
 	let showProfile = false;
+	let mobileNavOpen = false;
+	let mobileShowDetail = false;
 	let profileName = 'GGacrux';
 	let profilePhoto = '';
 	let signatureHtml = '';
@@ -216,6 +218,8 @@
 	}
 
 	function switchFolder(nextFolder: 'inbox' | 'sent' | 'trash') {
+		mobileNavOpen = false;
+		mobileShowDetail = false;
 		folder = nextFolder;
 		virtualFolder = ''; activeTag = '';
 		unreadOnly = false;
@@ -226,6 +230,7 @@
 	}
 
 	async function selectEmail(item: EmailSummary) {
+		mobileShowDetail = true;
 		loadingDetail = true;
 		try {
 			const res = await fetch(`/api/emails/${item.id}`);
@@ -369,7 +374,7 @@
 	async function loadStorage() { try { const r = await fetch('/api/storage'); if (r.ok) storage = await r.json(); } catch { /* optional metrics */ } }
 	function storagePercent(bytes: number, limit: number) { return Math.min(100, Math.max(0, bytes / limit * 100)); }
 	function storageTone(bytes: number, limit: number) { const p = storagePercent(bytes, limit); return p > 90 ? 'danger' : p > 75 ? 'warning' : ''; }
-	function selectVirtualView(value: string) { virtualFolder = value; activeTag = ''; selectedEmail = null; threadMessages = []; selectedIds = []; loadEmails(); }
+	function selectVirtualView(value: string) { mobileNavOpen = false; mobileShowDetail = false; virtualFolder = value; activeTag = ''; selectedEmail = null; threadMessages = []; selectedIds = []; loadEmails(); }
 	function createLabel() { const name = prompt('Label name'); if (!name?.trim()) return; const color = prompt('Label color (hex)', '#2563eb') || '#2563eb'; labels = [...labels, { name: name.trim(), color: /^#[0-9a-f]{6}$/i.test(color) ? color : '#2563eb' }]; localStorage.setItem('ggacrux_labels', JSON.stringify(labels)); }
 	async function toggleEmailTag(email: EmailSummary, tag: string) { let current: string[] = []; try { current = JSON.parse((email as EmailSummary & { tags?: string }).tags || '[]'); } catch {} const next = current.includes(tag) ? current.filter((v) => v !== tag) : [...current, tag]; const r = await fetch('/api/emails', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids: [email.id], tags: next }) }); if (!r.ok) { notify('Could not update labels'); return; } (email as EmailSummary & { tags?: string }).tags = JSON.stringify(next); emails = [...emails]; if (selectedEmail?.id === email.id) selectedEmail = { ...selectedEmail, tags: JSON.stringify(next) }; }
 	function handleFiles(event: Event) { const input = event.currentTarget as HTMLInputElement; const next = [...attachmentFiles, ...Array.from(input.files || [])]; if (next.reduce((n, f) => n + f.size, 0) > attachmentLimit) { attachmentError = 'Attachments must total 10 MB or less.'; input.value = ''; return; } attachmentFiles = next; attachmentError = ''; input.value = ''; }
@@ -401,6 +406,7 @@
 	}
 	function signatureBlock() { return signatureHtml.trim() ? '<div>' + signatureHtml + '</div><p><br></p>' : ''; }
 	function openCompose() {
+		mobileNavOpen = false;
 		composeError = '';
 		if (userEmail) fromAlias = userEmail;
 		fromName = profileName || (userEmail.split('@')[0] || 'GGacrux');
@@ -615,8 +621,22 @@
 </svelte:head>
 
 <div class="app-shell">
+	<header class="mobile-header">
+		<div class="mobile-header-brand">
+			<button type="button" class="mobile-menu-button" aria-label="Open navigation" aria-expanded={mobileNavOpen} on:click={() => (mobileNavOpen = true)}>☰</button>
+			<strong>GGacrux Mail</strong>
+			<button type="button" class="sidebar-close" aria-label="Close navigation" on:click={() => (mobileNavOpen = false)}>×</button>
+		</div>
+		<div class="mobile-header-actions">
+			<button type="button" class="btn-primary mobile-compose" on:click={openCompose}>+ Compose</button>
+			<button type="button" class="mobile-avatar-button" aria-label="Profile & Appearance" title="Profile & Appearance" on:click={() => (showProfile = true)}>
+				{#if profilePhoto}<img src={profilePhoto} alt="" />{:else}<span>{avatarInitial}</span>{/if}
+			</button>
+		</div>
+	</header>
+	{#if mobileNavOpen}<button type="button" class="mobile-nav-backdrop" aria-label="Close navigation" on:click={() => (mobileNavOpen = false)}></button>{/if}
 	<!-- Pane 1: Sidebar -->
-	<aside class="sidebar">
+	<aside class="sidebar" class:is-open={mobileNavOpen}>
 		<div class="brand">
 			<span class="logo-dot"></span>
 			<strong>GGacrux Mail</strong>
@@ -642,7 +662,7 @@
 		</nav>
 
 		<div class="smart-views"><strong>Smart Views</strong><button class:active={virtualFolder === "all"} on:click={() => selectVirtualView("all")}>All Mail</button><button class:active={virtualFolder === "attachments"} on:click={() => selectVirtualView("attachments")}>Has Attachments</button>{#each [...new Set(emails.map((mail) => mail.recipient_email).filter(Boolean))] as alias (alias)}<button class:active={virtualFolder === "alias:" + alias} on:click={() => selectVirtualView("alias:" + alias)}>↳ {alias}</button>{/each}</div>
-		<div class="label-nav"><div class="quick-links-heading"><strong>Labels</strong><button class="quick-add" type="button" on:click={createLabel}>+</button></div>{#each labels as label (label.name)}<button class:active={activeTag === label.name} on:click={() => { activeTag = activeTag === label.name ? "" : label.name; virtualFolder = ""; loadEmails(); }}><span class="label-dot" style={"background:" + label.color}></span>{label.name}</button>{/each}</div>
+		<div class="label-nav"><div class="quick-links-heading"><strong>Labels</strong><button class="quick-add" type="button" on:click={createLabel}>+</button></div>{#each labels as label (label.name)}<button class:active={activeTag === label.name} on:click={() => { mobileNavOpen = false; mobileShowDetail = false; activeTag = activeTag === label.name ? "" : label.name; virtualFolder = ""; loadEmails(); }}><span class="label-dot" style={"background:" + label.color}></span>{label.name}</button>{/each}</div>
 		<div class="quick-links">
 			<div class="quick-links-heading"><strong>Quick Links</strong><button class="quick-add" type="button" aria-label="Add quick link" title="Add bookmark" on:click={addQuickLink}>+</button></div>
 			{#each quickLinks as link (link.id)}
@@ -669,7 +689,7 @@
 	</aside>
 
 	<!-- Pane 2: Message List -->
-	<section class="message-list-pane" class:hidden-mobile={selectedEmail !== null}>
+	<section class="message-list-pane" class:mobile-hidden={mobileShowDetail}>
 		<div class="list-header">
 			<input
 				bind:this={searchInputEl}
@@ -760,14 +780,14 @@
 	</section>
 
 	<!-- Pane 3: Reading Pane -->
-	<main class="reading-pane" class:hidden-mobile={selectedEmail === null}>
+	<main class="reading-pane" class:mobile-hidden={!mobileShowDetail}>
 		{#if loadingDetail}
 			<div class="empty-state">Loading conversation...</div>
 		{:else if !selectedEmail}
 			<div class="empty-state">Select a message to read</div>
 		{:else}
 			<div class="reading-toolbar">
-				<button class="btn-secondary mobile-back" on:click={() => (selectedEmail = null)} title="Back to messages">←</button>
+				<button class="btn-secondary mobile-back" on:click={() => { mobileShowDetail = false; selectedEmail = null; attachments = []; }} title="Back to messages">← Back</button>
 				<div class="icon-toolbar reading-actions">
 					<button class="btn-icon" title="Reply" aria-label="Reply" on:click={() => selectedEmail && openReply(selectedEmail)}><svg viewBox="0 0 24 24"><path d="M9 14 4 9l5-5M4 9h10a6 6 0 0 1 6 6v3"/></svg></button>
 					<button class="btn-icon" title="Reply all" aria-label="Reply all" on:click={() => selectedEmail && openReplyAll(selectedEmail)}><svg viewBox="0 0 24 24"><path d="m8 14-5-5 5-5M3 9h9a6 6 0 0 1 6 6v3M15 14l5-5-5-5"/></svg></button>
