@@ -575,7 +575,7 @@
 		try {
 			const profile = JSON.parse(localStorage.getItem('ggacrux_profile') || '{}');
 			profileName = profile.displayName || (userEmail.split('@')[0] || 'GGacrux'); fromName = profileName;
-			profilePhoto = profile.photo || ''; signatureHtml = profile.signatureHtml || profile.signature || '';
+			profilePhoto = profile.photo || ''; signatureHtml = profile.signatureHtml || (profile.signature ? plainTextToHtml(profile.signature) : '');
 			selectedTheme = profile.theme || localStorage.getItem('ggacrux_theme') || 'slate';
 			document.documentElement.dataset.theme = selectedTheme;
 		} catch { profileName = userEmail.split('@')[0] || 'GGacrux'; }
