@@ -10,7 +10,7 @@ export const GET: RequestHandler = async ({ params, locals }) => {
 	await ensureMailOwnerColumn(db);
 	const email = await db.prepare('SELECT * FROM emails WHERE id = ? AND LOWER(owner_email) = ?').bind(params.id, owner).first();
 	if (!email) throw error(404, 'Email not found');
-	const { results: attachments } = await db.prepare('SELECT a.id, a.filename, a.content_type, a.size_bytes, a.r2_key FROM attachments a JOIN emails e ON e.id = a.email_id WHERE a.email_id = ? AND e.LOWER(owner_email) = ?').bind(params.id, owner).all();
+	const { results: attachments } = await db.prepare('SELECT a.id, a.filename, a.content_type, a.size_bytes, a.r2_key FROM attachments a JOIN emails e ON e.id = a.email_id WHERE a.email_id = ? AND LOWER(e.owner_email) = ?').bind(params.id, owner).all();
 	return json({ email, attachments: attachments ?? [] }, { headers: { 'Cache-Control': 'private, no-store' } });
 };
 
