@@ -33,7 +33,7 @@ async function getAccessKeys(issuer: string): Promise<AccessJwk[]> {
 
 async function verifyAccessIdentity(token: string): Promise<string> {
 	const config = env as unknown as { ACCESS_TEAM_DOMAIN?: string; ACCESS_AUD?: string };
-	const teamDomain = (config.ACCESS_TEAM_DOMAIN || '').trim().replace(/^https?:\\/\\//i, '').replace(/\\/$/, '');
+	const teamDomain = (config.ACCESS_TEAM_DOMAIN || '').trim().replace(/^https?:\/\//i, '').replace(/\/$/, '');
 	const audience = (config.ACCESS_AUD || '').trim();
 	if (!teamDomain || !audience) throw error(503, 'Cloudflare Access verification is not configured (ACCESS_TEAM_DOMAIN and ACCESS_AUD are required)');
 
@@ -64,7 +64,7 @@ async function verifyAccessIdentity(token: string): Promise<string> {
 	if (!valid) throw error(403, 'Cloudflare Access token signature is invalid');
 
 	const email = claims.email || claims.upn || claims.preferred_username;
-	if (typeof email !== 'string' || !/^[^\\s@]+@ggacrux\\.ca$/i.test(email.trim())) {
+	if (typeof email !== 'string' || !/^[^\s@]+@ggacrux\.ca$/i.test(email.trim())) {
 		throw error(403, 'An authorized @ggacrux.ca identity is required');
 	}
 	return email.trim().toLowerCase();
