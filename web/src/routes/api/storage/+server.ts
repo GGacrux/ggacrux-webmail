@@ -10,8 +10,8 @@ export const GET: RequestHandler = async ({ locals }) => {
 	await ensureMailOwnerColumn(db);
 	const usage = await db.prepare(`
 		SELECT
-			(SELECT COALESCE(SUM(LENGTH(COALESCE(text_body,'')) + LENGTH(COALESCE(html_body,'')) + LENGTH(COALESCE(subject,''))), 0) FROM emails WHERE owner_email = ?) AS used_bytes,
-			(SELECT COUNT(*) FROM emails WHERE owner_email = ?) AS email_count,
+			(SELECT COALESCE(SUM(LENGTH(COALESCE(text_body,'')) + LENGTH(COALESCE(html_body,'')) + LENGTH(COALESCE(subject,''))), 0) FROM emails WHERE LOWER(owner_email) = ?) AS used_bytes,
+			(SELECT COUNT(*) FROM emails WHERE LOWER(owner_email) = ?) AS email_count,
 			(SELECT COALESCE(SUM(a.size_bytes), 0) FROM attachments a JOIN emails e ON e.id = a.email_id WHERE LOWER(e.owner_email) = ?) AS attachment_bytes,
 			(SELECT COUNT(*) FROM attachments a JOIN emails e ON e.id = a.email_id WHERE LOWER(e.owner_email) = ?) AS attachment_count
 	`).bind(owner, owner, owner, owner).first<{ used_bytes: number; email_count: number; attachment_bytes: number; attachment_count: number }>();
