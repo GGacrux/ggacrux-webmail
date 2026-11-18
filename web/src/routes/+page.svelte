@@ -781,7 +781,7 @@
 						<summary><strong>{message.sender_name || message.sender_email}</strong><span>{formatDate(message.created_at)}</span><span>{message.subject || '(No Subject)'}</span></summary>
 						<div class="meta-grid"><div><strong>From:</strong> {message.sender_email}</div><div><strong>To:</strong> {message.recipient_email}</div></div>
 						{#if message.attachments?.length}<div class="attachments-bar">{#each message.attachments as att}<a class="attachment-chip" href="/api/attachments/{att.id}" download={att.filename}>📎 {att.filename} ({formatBytes(att.size_bytes)})</a>{/each}</div>{:else if message.id === selectedEmail.id && attachments.length}<div class="attachments-bar">{#each attachments as att}<a class="attachment-chip" href="/api/attachments/{att.id}" download={att.filename}>📎 {att.filename} ({formatBytes(att.size_bytes)})</a>{/each}</div>{/if}
-						{#if message.html_body}<iframe class="thread-frame" title="Email content" sandbox="allow-popups allow-popups-to-escape-sandbox allow-same-origin" srcdoc={buildSandboxedEmailHtml(message.html_body)} on:load={resizeEmailFrame}></iframe>{:else}<pre class="plain-body">{message.text_body || '(Empty message)'}</pre>{/if}
+						{#if message.html_body}<iframe class="thread-frame" title="Email content" sandbox="allow-popups allow-popups-to-escape-sandbox allow-same-origin" scrolling="no" srcdoc={buildSandboxedEmailHtml(message.html_body)} on:load={resizeEmailFrame}></iframe>{:else}<pre class="plain-body">{message.text_body || '(Empty message)'}</pre>{/if}
 					</details>
 				{/each}
 			</div>
@@ -814,7 +814,7 @@
 					<label for="subject">Subject</label>
 					<input id="subject" type="text" placeholder="Subject" bind:value={subject} required />
 				</div>
-				<div class="form-row"><label>Message</label>
+				<div class="form-row"><span class="field-label">Message</span>
 					<div class="format-toolbar" role="toolbar" aria-label="Message formatting">
 						<select aria-label="Font family" title="Font family" on:change={(event) => applyFont(editorEl, (event.currentTarget as HTMLSelectElement).value)}>
 							<option value="Arial">Default</option><option value="Arial, sans-serif">Sans-Serif</option><option value="Georgia, serif">Serif</option><option value="monospace">Monospace</option><option value="Georgia">Georgia</option><option value="Verdana">Verdana</option>
@@ -860,7 +860,7 @@
 				<div><label class="field-label" for="profile-photo">Profile picture</label><input id="profile-photo" type="file" accept="image/*" on:change={handleProfilePhoto} /><button class="btn-link" type="button" on:click={() => { profilePhoto = ''; saveProfile(); }}>Remove photo</button></div>
 			</div>
 			<div class="form-row"><label for="profile-name">Display name</label><input id="profile-name" bind:value={profileName} on:input={saveProfile} /></div>
-			<div class="form-row"><label for="profile-signature-editor">Email signature</label>
+			<div class="form-row"><span class="field-label">Email signature</span>
 				<div class="format-toolbar signature-toolbar" role="toolbar" aria-label="Signature formatting">
 					<select aria-label="Signature font family" title="Font family" on:change={(event) => applyFont(signatureEditorEl, (event.currentTarget as HTMLSelectElement).value)}><option value="Arial">Default</option><option value="Arial, sans-serif">Sans-Serif</option><option value="Georgia, serif">Serif</option><option value="monospace">Monospace</option><option value="Georgia">Georgia</option><option value="Verdana">Verdana</option></select>
 					<label class="color-control" title="Signature text color">A<input type="color" aria-label="Signature text color" on:input={(event) => applyTextColor(signatureEditorEl, (event.currentTarget as HTMLInputElement).value)} /></label>
