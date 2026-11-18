@@ -23,7 +23,7 @@ export async function ensureMailOwnerColumn(db: D1Database): Promise<void> {
 
 export function requireMailOwner(userEmail: string | undefined): string {
 	const owner = (userEmail || '').trim().toLowerCase();
-	if (!owner || !/^[^\\s@]+@ggacrux\\.ca$/i.test(owner)) {
+	if (!owner || !/^[^\s@]+@ggacrux\.ca$/i.test(owner)) {
 		throw error(401, 'An authenticated GGacrux account is required');
 	}
 	return owner;
