@@ -216,6 +216,7 @@
 
 	function switchFolder(nextFolder: 'inbox' | 'sent' | 'trash') {
 		folder = nextFolder;
+		virtualFolder = ''; activeTag = '';
 		unreadOnly = false;
 		selectedEmail = null;
 		attachments = [];
