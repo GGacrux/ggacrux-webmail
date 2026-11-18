@@ -201,7 +201,9 @@
 	async function loadEmails(silent = false) {
 		const requestId = ++emailListRequestId;
 		loadingMore = false;
-		if (!silent) { loadingList = true; listOffset = 0; }
+		const showLoading = !silent || loadingList;
+		if (showLoading) loadingList = true;
+		if (!silent) listOffset = 0;
 		try {
 			const params = new URLSearchParams({ folder, limit: '25', offset: '0' });
 			if (virtualFolder) params.set('virtualFolder', virtualFolder); if (activeTag) params.set('tag', activeTag);
@@ -222,7 +224,7 @@
 		} catch (err) {
 			if (requestId === emailListRequestId && !silent) notify((err as Error).message);
 		} finally {
-			if (requestId === emailListRequestId && !silent) loadingList = false;
+			if (requestId === emailListRequestId && showLoading) loadingList = false;
 		}
 		if (requestId === emailListRequestId) await loadStorage();
 	}
