@@ -38,6 +38,7 @@
 	let unreadCount = 0;
 	let loadingList = false;
 	let loadingMore = false;
+	let emailListRequestId = 0;
 	let hasMore = false;
 	let totalCount = 0;
 	let listOffset = 0;
@@ -199,14 +200,18 @@
 	}
 
 	async function loadEmails(silent = false) {
+		const requestId = ++emailListRequestId;
+		loadingMore = false;
 		if (!silent) { loadingList = true; listOffset = 0; }
 		try {
 			const params = new URLSearchParams({ folder, limit: '25', offset: '0' });
 			if (virtualFolder) params.set('virtualFolder', virtualFolder); if (activeTag) params.set('tag', activeTag);
 			if (searchQuery.trim()) params.set('q', searchQuery.trim());
 			const res = await apiFetch(`/api/emails?${params}`);
+			if (requestId !== emailListRequestId) return;
 			if (!res.ok) throw new Error('Failed to load emails');
 			const payload = await res.json();
+			if (requestId !== emailListRequestId) return;
 			if (silent) {
 				const fresh = payload.emails as EmailSummary[];
 				const known = new Set(emails.map((item) => item.id));
@@ -215,27 +220,36 @@
 			unreadCount = payload.unreadCount;
 			totalCount = payload.totalCount;
 			hasMore = payload.hasMore;
-		} catch (err) { if (!silent) notify((err as Error).message); }
-		finally { if (!silent) loadingList = false; }
-		await loadStorage();
+		} catch (err) {
+			if (requestId === emailListRequestId && !silent) notify((err as Error).message);
+		} finally {
+			if (requestId === emailListRequestId && !silent) loadingList = false;
+		}
+		if (requestId === emailListRequestId) await loadStorage();
 	}
 
 	async function loadMore() {
 		if (loadingMore || !hasMore) return;
+		const requestId = emailListRequestId;
 		loadingMore = true;
 		try {
 			const params = new URLSearchParams({ folder, limit: '25', offset: String(listOffset) });
 			if (virtualFolder) params.set('virtualFolder', virtualFolder); if (activeTag) params.set('tag', activeTag);
 			if (searchQuery.trim()) params.set('q', searchQuery.trim());
 			const res = await apiFetch(`/api/emails?${params}`);
+			if (requestId !== emailListRequestId) return;
 			if (!res.ok) throw new Error('Failed to load more messages');
 			const payload = await res.json();
+			if (requestId !== emailListRequestId) return;
 			emails = [...emails, ...payload.emails.filter((item: EmailSummary) => !emails.some((old) => old.id === item.id))];
 			listOffset += payload.emails.length;
 			hasMore = payload.hasMore;
 			totalCount = payload.totalCount;
-		} catch (err) { notify((err as Error).message); }
-		finally { loadingMore = false; }
+		} catch (err) {
+			if (requestId === emailListRequestId) notify((err as Error).message);
+		} finally {
+			if (requestId === emailListRequestId) loadingMore = false;
+		}
 	}
 
 	function handleSearchInput() {
@@ -246,6 +260,8 @@
 	}
 
 	function switchFolder(nextFolder: 'inbox' | 'sent' | 'trash') {
+		emailListRequestId += 1;
+		loadingMore = false;
 		emailSelectionRequestId += 1;
 		loadingDetail = false;
 		mobileNavOpen = false;
@@ -417,6 +433,8 @@
 	function storagePercent(bytes: number, limit: number) { return Math.min(100, Math.max(0, bytes / limit * 100)); }
 	function storageTone(bytes: number, limit: number) { const p = storagePercent(bytes, limit); return p > 90 ? 'danger' : p > 75 ? 'warning' : ''; }
 	function selectVirtualView(value: string) {
+		emailListRequestId += 1;
+		loadingMore = false;
 		emailSelectionRequestId += 1;
 		loadingDetail = false;
 		mobileNavOpen = false;
@@ -668,7 +686,6 @@
 		} catch { profileName = userEmail.split('@')[0] || 'GGacrux'; }
 		try { quickLinks = JSON.parse(localStorage.getItem('ggacrux_quick_links') || '[]'); } catch { quickLinks = []; }
 		try { labels = JSON.parse(localStorage.getItem('ggacrux_labels') || '[]'); } catch { labels = []; }
-		void loadStorage();
 		const saved = localStorage.getItem(draftKey);
 		if (saved) { try { const draft = JSON.parse(saved); to = draft.to || ''; cc = draft.cc || ''; bcc = draft.bcc || ''; subject = draft.subject || ''; textBody = draft.textBody || ''; htmlBody = draft.htmlBody || ''; fromAlias = userEmail; fromName = draft.fromName || fromName; restoredDraft = true; } catch { localStorage.removeItem(draftKey); } }
 		const draftTimer = setInterval(() => { if (showCompose) localStorage.setItem(draftKey, JSON.stringify({ to, cc, bcc, subject, textBody, htmlBody: editorEl?.innerHTML || htmlBody, fromName })); }, 800);
@@ -692,6 +709,7 @@
 		return () => {
 			window.clearInterval(pollInterval);
 			window.clearInterval(draftTimer);
+			clearTimeout(searchTimer);
 			document.removeEventListener('visibilitychange', handleVisibilityChange);
 			window.removeEventListener('focus', handleWindowFocus);
 			observer?.disconnect();
