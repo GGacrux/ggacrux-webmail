@@ -1,6 +1,7 @@
 import { json, error } from '@sveltejs/kit';
 import { env } from 'cloudflare:workers';
 import type { RequestHandler } from './$types';
+import { ensureMailOwnerColumn, requireMailOwner } from '$lib/server/mail-owner';
 
 interface SendPayload {
 	fromName?: string;
@@ -157,8 +158,8 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 		const resendData = await resendRes.json<{ id?: string; message?: string }>();
 		if (!resendRes.ok) throw error(resendRes.status, resendData.message || 'Failed to send email via Resend');
 		const messageId = resendData.id ? `<${resendData.id}@resend.dev>` : `<${emailId}@ggacrux.ca>`;
-		await db.prepare(`INSERT INTO emails (id, message_id, in_reply_to, references_header, folder, sender_name, sender_email, recipient_email, subject, text_body, html_body, is_read) VALUES (?, ?, ?, ?, 'sent', ?, ?, ?, ?, ?, ?, 1)`)
-			.bind(emailId, messageId, payload.inReplyTo || null, updatedReferences, senderName, senderEmail, to.join(', '), payload.subject.trim(), textBody, htmlBody).run();
+		await db.prepare(`INSERT INTO emails (owner_email, id, message_id, in_reply_to, references_header, folder, sender_name, sender_email, recipient_email, subject, text_body, html_body, is_read) VALUES (?, ?, ?, ?, ?, 'sent', ?, ?, ?, ?, ?, ?, 1)`)
+			.bind(senderEmail, emailId, messageId, payload.inReplyTo || null, updatedReferences, senderName, senderEmail, to.join(', '), payload.subject.trim(), textBody, htmlBody).run();
 		for (const item of uploaded) {
 			await db.prepare('INSERT INTO attachments (id, email_id, filename, content_type, size_bytes, r2_key) VALUES (?, ?, ?, ?, ?, ?)')
 				.bind(item.id, emailId, item.filename, item.contentType, item.size, item.r2Key).run();
