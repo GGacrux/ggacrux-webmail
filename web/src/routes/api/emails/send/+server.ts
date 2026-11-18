@@ -57,6 +57,12 @@ function sanitizeHtml(input: string): string {
 			if (key === 'style') {
 				const style = safeStyle(value);
 				if (style) attrs.push('style="' + style.replace(/"/g, '&quot;') + '"');
+			} else if (name === 'font' && key === 'face') {
+				const font = safeCssValue('font-family', value);
+				if (font) attrs.push('style="font-family:' + font.replace(/"/g, '&quot;') + '"');
+			} else if (name === 'font' && key === 'color') {
+				const color = safeCssValue('color', value);
+				if (color) attrs.push('style="color:' + color.replace(/"/g, '&quot;') + '"');
 			} else if (name === 'a' && key === 'href' && /^(https?:|mailto:)/i.test(value.trim())) {
 				attrs.push('href="' + value.replace(/&/g, '&amp;').replace(/"/g, '&quot;') + '"');
 			} else if (key === 'title' || key === 'colspan' || key === 'rowspan' || key === 'align') {
