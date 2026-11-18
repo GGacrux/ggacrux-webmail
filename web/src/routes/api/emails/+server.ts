@@ -21,22 +21,22 @@ export const GET: RequestHandler = async ({ url, locals }) => {
 		const thread = await db.prepare(`
 			WITH RECURSIVE thread(id, message_id, in_reply_to, references_header) AS (
 				SELECT id, message_id, in_reply_to, references_header FROM emails
-				WHERE owner_email = ? AND (id = ? OR message_id = ?)
+				WHERE LOWER(owner_email) = ? AND (id = ? OR message_id = ?)
 				UNION
 				SELECT e.id, e.message_id, e.in_reply_to, e.references_header FROM emails e JOIN thread t
-				ON e.owner_email = ? AND (
+				ON LOWER(e.owner_email) = ? AND (
 					e.in_reply_to = t.message_id OR t.in_reply_to = e.message_id
 					OR (t.message_id IS NOT NULL AND e.references_header LIKE '%' || t.message_id || '%')
 					OR (e.message_id IS NOT NULL AND t.references_header LIKE '%' || e.message_id || '%')
 				)
 			)
 			SELECT e.* FROM emails e JOIN thread t ON t.id = e.id
-			WHERE e.owner_email = ?
+			WHERE LOWER(e.owner_email) = ?
 			ORDER BY datetime(e.created_at) ASC, e.id ASC
 		`).bind(owner, threadId, threadId, owner, owner).all<Record<string, unknown>>();
 		const rows = thread.results ?? [];
 		const ids = rows.map((row) => String(row.id));
-		const attachmentRows = ids.length ? await db.prepare(`SELECT id, email_id, filename, content_type, size_bytes, r2_key FROM attachments WHERE email_id IN (${ids.map(() => '?').join(',')})`).bind(...ids).all() : { results: [] };
+		const attachmentRows = ids.length ? await db.prepare(`SELECT a.id, a.email_id, a.filename, a.content_type, a.size_bytes, a.r2_key FROM attachments a JOIN emails e ON e.id = a.email_id WHERE LOWER(e.owner_email) = ? AND a.email_id IN (${ids.map(() => '?').join(',')})`).bind(owner, ...ids).all() : { results: [] };
 		const attachments = attachmentRows.results ?? [];
 		return json({ emails: rows.map((row) => ({ ...row, attachments: attachments.filter((a: Record<string, unknown>) => a.email_id === row.id) })), unreadCount: 0, hasMore: false }, { headers: { 'Cache-Control': 'private, no-store' } });
 	}
@@ -48,7 +48,7 @@ export const GET: RequestHandler = async ({ url, locals }) => {
 	if (!['inbox', 'sent', 'trash'].includes(folder) && !virtualFolder) throw error(400, 'Invalid folder');
 	const limit = Math.min(100, Math.max(1, Number.parseInt(url.searchParams.get('limit') || '25', 10) || 25));
 	const offset = Math.max(0, Number.parseInt(url.searchParams.get('offset') || '0', 10) || 0);
-	let where = ' FROM emails WHERE owner_email = ?';
+	let where = ' FROM emails WHERE LOWER(owner_email) = ?';
 	const params: (string | number)[] = [owner];
 	if (virtualFolder === 'all') where += " AND folder != 'trash'";
 	else if (virtualFolder === 'attachments') where += ' AND EXISTS (SELECT 1 FROM attachments a WHERE a.email_id = emails.id)';
@@ -60,7 +60,7 @@ export const GET: RequestHandler = async ({ url, locals }) => {
 	const [page, total, unread] = await Promise.all([
 		db.prepare('SELECT id, message_id, in_reply_to, references_header, folder, sender_name, sender_email, recipient_email, subject, substr(text_body, 1, 160) AS snippet, is_read, created_at, COALESCE(tags, \'[]\') AS tags, EXISTS (SELECT 1 FROM attachments a WHERE a.email_id = emails.id) AS has_attachments' + where + ' ORDER BY datetime(created_at) DESC, id DESC LIMIT ? OFFSET ?').bind(...params, limit, offset).all(),
 		db.prepare('SELECT COUNT(*) AS count' + where).bind(...params).first<{ count: number }>(),
-		db.prepare("SELECT COUNT(*) AS count FROM emails WHERE owner_email = ? AND folder = 'inbox' AND is_read = 0").bind(owner).first<{ count: number }>()
+		db.prepare("SELECT COUNT(*) AS count FROM emails WHERE LOWER(owner_email) = ? AND folder = 'inbox' AND is_read = 0").bind(owner).first<{ count: number }>()
 	]);
 	const results = page.results ?? [];
 	const totalCount = Number(total?.count ?? 0);
@@ -85,6 +85,6 @@ export const PATCH: RequestHandler = async ({ request, locals }) => {
 		updates.push('tags = ?'); values.push(JSON.stringify([...new Set(body.tags.map((tag) => tag.trim()).filter(Boolean))]));
 	}
 	if (!updates.length) throw error(400, 'No valid fields to update');
-	const result = await db.prepare(`UPDATE emails SET ${updates.join(', ')} WHERE owner_email = ? AND id IN (${ids.map(() => '?').join(',')})`).bind(...values, owner, ...ids).run();
+	const result = await db.prepare(`UPDATE emails SET ${updates.join(', ')} WHERE LOWER(owner_email) = ? AND id IN (${ids.map(() => '?').join(',')})`).bind(...values, owner, ...ids).run();
 	return json({ success: true, updated: result.meta.changes }, { headers: { 'Cache-Control': 'private, no-store' } });
 };

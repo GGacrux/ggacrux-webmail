@@ -38,6 +38,7 @@
 	let unreadCount = 0;
 	let loadingList = false;
 	let loadingMore = false;
+	let emailListRequestId = 0;
 	let hasMore = false;
 	let totalCount = 0;
 	let listOffset = 0;
@@ -49,7 +50,10 @@
 	let selectedEmail: EmailDetail | null = null;
 	let attachments: Attachment[] = [];
 	let loadingDetail = false;
-	let sanitizedSrcDoc = '';
+	let emailSelectionRequestId = 0;
+	let pollingEmails = false;
+	const emailFrameObservers = new WeakMap<HTMLIFrameElement, ResizeObserver>();
+	let authRedirectInProgress = false;
 	let threadMessages: (EmailDetail & { attachments?: Attachment[] })[] = [];
 	let virtualFolder = ''; let activeTag = ''; let labels: Label[] = []; let storage: StorageUsage | null = null;
 	let htmlBody = ''; let htmlMode = false; let editorEl: HTMLDivElement;
@@ -170,15 +174,48 @@
 		}, 3500);
 	}
 
+	async function apiFetch(input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> {
+		if (authRedirectInProgress) return new Promise<Response>(() => {});
+		try {
+			const headers = new Headers(init.headers);
+			if (!headers.has('X-Requested-With')) headers.set('X-Requested-With', 'XMLHttpRequest');
+			const response = await fetch(input, {
+				...init,
+				headers,
+				credentials: 'same-origin',
+				redirect: 'manual'
+			});
+			const accessRedirect = response.type === 'opaqueredirect' ||
+				response.status === 401 ||
+				response.status === 403 ||
+				response.url.includes('cloudflareaccess.com');
+			if (accessRedirect) {
+				authRedirectInProgress = true;
+				window.location.reload();
+				return await new Promise<Response>(() => {});
+			}
+			return response;
+		} catch (cause) {
+			if (authRedirectInProgress) return await new Promise<Response>(() => {});
+			throw cause;
+		}
+	}
+
 	async function loadEmails(silent = false) {
-		if (!silent) { loadingList = true; listOffset = 0; }
+		const requestId = ++emailListRequestId;
+		loadingMore = false;
+		const showLoading = !silent || loadingList;
+		if (showLoading) loadingList = true;
+		if (!silent) listOffset = 0;
 		try {
 			const params = new URLSearchParams({ folder, limit: '25', offset: '0' });
 			if (virtualFolder) params.set('virtualFolder', virtualFolder); if (activeTag) params.set('tag', activeTag);
 			if (searchQuery.trim()) params.set('q', searchQuery.trim());
-			const res = await fetch(`/api/emails?${params}`);
+			const res = await apiFetch(`/api/emails?${params}`);
+			if (requestId !== emailListRequestId) return;
 			if (!res.ok) throw new Error('Failed to load emails');
 			const payload = await res.json();
+			if (requestId !== emailListRequestId) return;
 			if (silent) {
 				const fresh = payload.emails as EmailSummary[];
 				const known = new Set(emails.map((item) => item.id));
@@ -187,27 +224,36 @@
 			unreadCount = payload.unreadCount;
 			totalCount = payload.totalCount;
 			hasMore = payload.hasMore;
-		} catch (err) { if (!silent) notify((err as Error).message); }
-		finally { if (!silent) loadingList = false; }
-		await loadStorage();
+		} catch (err) {
+			if (requestId === emailListRequestId && !silent) notify((err as Error).message);
+		} finally {
+			if (requestId === emailListRequestId && showLoading) loadingList = false;
+		}
+		if (requestId === emailListRequestId) await loadStorage();
 	}
 
 	async function loadMore() {
 		if (loadingMore || !hasMore) return;
+		const requestId = emailListRequestId;
 		loadingMore = true;
 		try {
 			const params = new URLSearchParams({ folder, limit: '25', offset: String(listOffset) });
 			if (virtualFolder) params.set('virtualFolder', virtualFolder); if (activeTag) params.set('tag', activeTag);
 			if (searchQuery.trim()) params.set('q', searchQuery.trim());
-			const res = await fetch(`/api/emails?${params}`);
+			const res = await apiFetch(`/api/emails?${params}`);
+			if (requestId !== emailListRequestId) return;
 			if (!res.ok) throw new Error('Failed to load more messages');
 			const payload = await res.json();
+			if (requestId !== emailListRequestId) return;
 			emails = [...emails, ...payload.emails.filter((item: EmailSummary) => !emails.some((old) => old.id === item.id))];
 			listOffset += payload.emails.length;
 			hasMore = payload.hasMore;
 			totalCount = payload.totalCount;
-		} catch (err) { notify((err as Error).message); }
-		finally { loadingMore = false; }
+		} catch (err) {
+			if (requestId === emailListRequestId) notify((err as Error).message);
+		} finally {
+			if (requestId === emailListRequestId) loadingMore = false;
+		}
 	}
 
 	function handleSearchInput() {
@@ -218,6 +264,10 @@
 	}
 
 	function switchFolder(nextFolder: 'inbox' | 'sent' | 'trash') {
+		emailListRequestId += 1;
+		loadingMore = false;
+		emailSelectionRequestId += 1;
+		loadingDetail = false;
 		mobileNavOpen = false;
 		mobileShowDetail = false;
 		folder = nextFolder;
@@ -225,44 +275,51 @@
 		unreadOnly = false;
 		selectedEmail = null;
 		attachments = [];
+		threadMessages = [];
 		selectedIds = [];
 		loadEmails();
 	}
 
 	async function selectEmail(item: EmailSummary) {
+		const requestId = ++emailSelectionRequestId;
 		mobileShowDetail = true;
 		loadingDetail = true;
 		try {
-			const res = await fetch(`/api/emails/${item.id}`);
+			const res = await apiFetch(`/api/emails/${item.id}`);
+			if (requestId !== emailSelectionRequestId) return;
 			if (!res.ok) throw new Error('Failed to load message');
 			const payload = await res.json();
+			if (requestId !== emailSelectionRequestId) return;
 			selectedEmail = payload.email;
 			attachments = payload.attachments || [];
-			const threadRes = await fetch('/api/emails?threadId=' + encodeURIComponent(item.message_id || item.id));
-			if (threadRes.ok) { const threadPayload = await threadRes.json(); threadMessages = threadPayload.emails || []; } else threadMessages = [{ ...payload.email, attachments: payload.attachments || [] }];
 
-			if (selectedEmail?.html_body) {
-				sanitizedSrcDoc = buildSandboxedEmailHtml(selectedEmail.html_body);
+			const threadRes = await apiFetch('/api/emails?threadId=' + encodeURIComponent(item.message_id || item.id));
+			if (requestId !== emailSelectionRequestId) return;
+			if (threadRes.ok) {
+				const threadPayload = await threadRes.json();
+				if (requestId !== emailSelectionRequestId) return;
+				threadMessages = threadPayload.emails || [];
 			} else {
-				sanitizedSrcDoc = '';
+				threadMessages = [{ ...payload.email, attachments: payload.attachments || [] }];
 			}
 
-			// Mark as read automatically if unread
 			if (item.is_read === 0) {
-				await fetch(`/api/emails/${item.id}`, {
+				const readResponse = await apiFetch(`/api/emails/${item.id}`, {
 					method: 'PATCH',
 					headers: { 'Content-Type': 'application/json' },
 					body: JSON.stringify({ is_read: 1 })
 				});
+				if (requestId !== emailSelectionRequestId) return;
+				if (!readResponse.ok) throw new Error('Failed to mark message as read');
 				item.is_read = 1;
 				if (selectedEmail) selectedEmail = { ...selectedEmail, is_read: 1 };
 				emails = [...emails];
 				if (folder === 'inbox' && unreadCount > 0) unreadCount -= 1;
 			}
 		} catch (err) {
-			notify((err as Error).message);
+			if (requestId === emailSelectionRequestId) notify((err as Error).message);
 		} finally {
-			loadingDetail = false;
+			if (requestId === emailSelectionRequestId) loadingDetail = false;
 		}
 	}
 
@@ -274,8 +331,8 @@
 		try {
 			const idsToUpdate = [...selectedIds];
 		await Promise.all(idsToUpdate.map((id) => action === 'delete'
-				? fetch(`/api/emails/${id}`, { method: 'DELETE' })
-				: fetch(`/api/emails/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(action === 'trash' ? { folder: 'trash' } : { is_read: action === 'read' ? 1 : 0 }) })));
+				? apiFetch(`/api/emails/${id}`, { method: 'DELETE' })
+				: apiFetch(`/api/emails/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(action === 'trash' ? { folder: 'trash' } : { is_read: action === 'read' ? 1 : 0 }) })));
 			if (selectedEmail && idsToUpdate.includes(selectedEmail.id) && (action === 'trash' || action === 'delete')) selectedEmail = null;
 			selectedIds = [];
 			await loadEmails();
@@ -286,7 +343,7 @@
 
 	async function toggleRead(email: EmailDetail) {
 		const nextState = email.is_read === 1 ? 0 : 1;
-		await fetch(`/api/emails/${email.id}`, {
+		await apiFetch(`/api/emails/${email.id}`, {
 			method: 'PATCH',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({ is_read: nextState })
@@ -303,7 +360,7 @@
 		try {
 			await Promise.all(
 				unreadItems.map((item) =>
-					fetch(`/api/emails/${item.id}`, {
+					apiFetch(`/api/emails/${item.id}`, {
 						method: 'PATCH',
 						headers: { 'Content-Type': 'application/json' },
 						body: JSON.stringify({ is_read: 1 })
@@ -321,7 +378,7 @@
 	}
 
 	async function moveToFolder(id: string, targetFolder: 'inbox' | 'trash') {
-		await fetch(`/api/emails/${id}`, {
+		await apiFetch(`/api/emails/${id}`, {
 			method: 'PATCH',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({ folder: targetFolder })
@@ -336,7 +393,7 @@
 		if (!confirm('Permanently delete this email and any stored attachments? This cannot be undone.')) {
 			return;
 		}
-		const res = await fetch(`/api/emails/${id}`, { method: 'DELETE' });
+		const res = await apiFetch(`/api/emails/${id}`, { method: 'DELETE' });
 		if (res.ok) {
 			selectedEmail = null;
 			attachments = [];
@@ -359,7 +416,7 @@
 
 		bulkWorking = true;
 		try {
-			await Promise.all(emails.map((item) => fetch(`/api/emails/${item.id}`, { method: 'DELETE' })));
+			await Promise.all(emails.map((item) => apiFetch(`/api/emails/${item.id}`, { method: 'DELETE' })));
 			selectedEmail = null;
 			attachments = [];
 			notify('Trash emptied');
@@ -371,12 +428,42 @@
 		}
 	}
 
-	async function loadStorage() { try { const r = await fetch('/api/storage'); if (r.ok) storage = await r.json(); } catch { /* optional metrics */ } }
+	async function loadStorage() { try { const r = await apiFetch('/api/storage'); if (r.ok) storage = await r.json(); } catch { /* optional metrics */ } }
 	function storagePercent(bytes: number, limit: number) { return Math.min(100, Math.max(0, bytes / limit * 100)); }
 	function storageTone(bytes: number, limit: number) { const p = storagePercent(bytes, limit); return p > 90 ? 'danger' : p > 75 ? 'warning' : ''; }
-	function selectVirtualView(value: string) { mobileNavOpen = false; mobileShowDetail = false; virtualFolder = value; activeTag = ''; selectedEmail = null; threadMessages = []; selectedIds = []; loadEmails(); }
+	function selectVirtualView(value: string) {
+		emailListRequestId += 1;
+		loadingMore = false;
+		emailSelectionRequestId += 1;
+		loadingDetail = false;
+		mobileNavOpen = false;
+		mobileShowDetail = false;
+		virtualFolder = value;
+		activeTag = '';
+		selectedEmail = null;
+		attachments = [];
+		threadMessages = [];
+		selectedIds = [];
+		loadEmails();
+	}
+
+	function selectTag(value: string) {
+		emailListRequestId += 1;
+		loadingMore = false;
+		emailSelectionRequestId += 1;
+		loadingDetail = false;
+		mobileNavOpen = false;
+		mobileShowDetail = false;
+		activeTag = activeTag === value ? '' : value;
+		virtualFolder = '';
+		selectedEmail = null;
+		attachments = [];
+		threadMessages = [];
+		selectedIds = [];
+		loadEmails();
+	}
 	function createLabel() { const name = prompt('Label name'); if (!name?.trim()) return; const color = prompt('Label color (hex)', '#2563eb') || '#2563eb'; labels = [...labels, { name: name.trim(), color: /^#[0-9a-f]{6}$/i.test(color) ? color : '#2563eb' }]; localStorage.setItem('ggacrux_labels', JSON.stringify(labels)); }
-	async function toggleEmailTag(email: EmailSummary, tag: string) { let current: string[] = []; try { current = JSON.parse((email as EmailSummary & { tags?: string }).tags || '[]'); } catch {} const next = current.includes(tag) ? current.filter((v) => v !== tag) : [...current, tag]; const r = await fetch('/api/emails', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids: [email.id], tags: next }) }); if (!r.ok) { notify('Could not update labels'); return; } (email as EmailSummary & { tags?: string }).tags = JSON.stringify(next); emails = [...emails]; if (selectedEmail?.id === email.id) selectedEmail = { ...selectedEmail, tags: JSON.stringify(next) }; }
+	async function toggleEmailTag(email: EmailSummary, tag: string) { let current: string[] = []; try { current = JSON.parse((email as EmailSummary & { tags?: string }).tags || '[]'); } catch {} const next = current.includes(tag) ? current.filter((v) => v !== tag) : [...current, tag]; const r = await apiFetch('/api/emails', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids: [email.id], tags: next }) }); if (!r.ok) { notify('Could not update labels'); return; } (email as EmailSummary & { tags?: string }).tags = JSON.stringify(next); emails = [...emails]; if (selectedEmail?.id === email.id) selectedEmail = { ...selectedEmail, tags: JSON.stringify(next) }; }
 	function handleFiles(event: Event) { const input = event.currentTarget as HTMLInputElement; const next = [...attachmentFiles, ...Array.from(input.files || [])]; if (next.reduce((n, f) => n + f.size, 0) > attachmentLimit) { attachmentError = 'Attachments must total 10 MB or less.'; input.value = ''; return; } attachmentFiles = next; attachmentError = ''; input.value = ''; }
 	function removeFile(index: number) { attachmentFiles = attachmentFiles.filter((_, i) => i !== index); attachmentError = ''; }
 	function runEditorCommand(target: HTMLDivElement | undefined, command: string, value?: string) {
@@ -482,7 +569,7 @@
 			form.set('fromName', fromName); form.set('to', to); form.set('cc', cc); form.set('bcc', bcc); form.set('subject', subject); form.set('text', outgoingText); form.set('html', outgoingHtml);
 			if (inReplyTo) form.set('inReplyTo', inReplyTo); if (references) form.set('references', references);
 			for (const file of attachmentFiles) form.append('attachments', file, file.name);
-			const res = await fetch('/api/emails/send', { method: 'POST', body: form });
+			const res = await apiFetch('/api/emails/send', { method: 'POST', body: form });
 			const payload = await res.json();
 			if (!res.ok) throw new Error(payload.message || 'Failed to send email');
 
@@ -516,8 +603,13 @@
 		if (event.key === 'Escape') {
 			if (showCompose) {
 				composeMinimized = true;
-			} else if (selectedEmail) {
+			} else if (selectedEmail || loadingDetail) {
+				emailSelectionRequestId += 1;
+				loadingDetail = false;
 				selectedEmail = null;
+				attachments = [];
+				threadMessages = [];
+				mobileShowDetail = false;
 			}
 			return;
 		}
@@ -558,8 +650,27 @@
 		const iframe = event.currentTarget as HTMLIFrameElement;
 		try {
 			const doc = iframe.contentDocument;
-			const contentHeight = doc?.documentElement?.scrollHeight || doc?.body?.scrollHeight || 0;
-			iframe.style.height = Math.max(450, contentHeight + 24) + 'px';
+			if (!doc) throw new Error('Email frame document is unavailable');
+			const resize = () => {
+				const body = doc.body;
+				const root = doc.documentElement;
+				const contentHeight = Math.max(
+					body?.scrollHeight ?? 0,
+					body?.offsetHeight ?? 0,
+					root?.scrollHeight ?? 0,
+					root?.offsetHeight ?? 0
+				);
+				iframe.style.height = Math.max(450, contentHeight + 24) + 'px';
+			};
+			emailFrameObservers.get(iframe)?.disconnect();
+			resize();
+			if (typeof ResizeObserver !== 'undefined' && doc.documentElement) {
+				const observer = new ResizeObserver(resize);
+				observer.observe(doc.documentElement);
+				if (doc.body) observer.observe(doc.body);
+				emailFrameObservers.set(iframe, observer);
+			}
+			doc.querySelectorAll('img').forEach((image) => image.addEventListener('load', resize));
 		} catch {
 			iframe.style.height = '450px';
 		}
@@ -596,7 +707,6 @@
 		} catch { profileName = userEmail.split('@')[0] || 'GGacrux'; }
 		try { quickLinks = JSON.parse(localStorage.getItem('ggacrux_quick_links') || '[]'); } catch { quickLinks = []; }
 		try { labels = JSON.parse(localStorage.getItem('ggacrux_labels') || '[]'); } catch { labels = []; }
-		void loadStorage();
 		const saved = localStorage.getItem(draftKey);
 		if (saved) { try { const draft = JSON.parse(saved); to = draft.to || ''; cc = draft.cc || ''; bcc = draft.bcc || ''; subject = draft.subject || ''; textBody = draft.textBody || ''; htmlBody = draft.htmlBody || ''; fromAlias = userEmail; fromName = draft.fromName || fromName; restoredDraft = true; } catch { localStorage.removeItem(draftKey); } }
 		const draftTimer = setInterval(() => { if (showCompose) localStorage.setItem(draftKey, JSON.stringify({ to, cc, bcc, subject, textBody, htmlBody: editorEl?.innerHTML || htmlBody, fromName })); }, 800);
@@ -604,13 +714,27 @@
 		loadEmails().then(() => { if (sentinelEl) observer?.observe(sentinelEl); });
 
 		// Auto-refresh inbox/folder every 30s when tab is active
-		const pollInterval = setInterval(() => {
-			if (!document.hidden && !showCompose) {
-				loadEmails(true); loadStorage();
-			}
-		}, 30000);
+		const refreshWhenActive = () => {
+			if (document.hidden || showCompose || pollingEmails || authRedirectInProgress) return;
+			pollingEmails = true;
+			void loadEmails(true).finally(() => { pollingEmails = false; });
+		};
+		const handleVisibilityChange = () => {
+			if (!document.hidden) refreshWhenActive();
+		};
+		const handleWindowFocus = () => refreshWhenActive();
+		document.addEventListener('visibilitychange', handleVisibilityChange);
+		window.addEventListener('focus', handleWindowFocus);
+		const pollInterval = window.setInterval(refreshWhenActive, 30000);
 
-		return () => { clearInterval(pollInterval); clearInterval(draftTimer); observer?.disconnect(); };
+		return () => {
+			window.clearInterval(pollInterval);
+			window.clearInterval(draftTimer);
+			clearTimeout(searchTimer);
+			document.removeEventListener('visibilitychange', handleVisibilityChange);
+			window.removeEventListener('focus', handleWindowFocus);
+			observer?.disconnect();
+		};
 	});
 </script>
 
@@ -662,7 +786,7 @@
 		</nav>
 
 		<div class="smart-views"><strong>Smart Views</strong><button class:active={virtualFolder === "all"} on:click={() => selectVirtualView("all")}>All Mail</button><button class:active={virtualFolder === "attachments"} on:click={() => selectVirtualView("attachments")}>Has Attachments</button>{#each [...new Set(emails.map((mail) => mail.recipient_email).filter(Boolean))] as alias (alias)}<button class:active={virtualFolder === "alias:" + alias} on:click={() => selectVirtualView("alias:" + alias)}>↳ {alias}</button>{/each}</div>
-		<div class="label-nav"><div class="quick-links-heading"><strong>Labels</strong><button class="quick-add" type="button" on:click={createLabel}>+</button></div>{#each labels as label (label.name)}<button class:active={activeTag === label.name} on:click={() => { mobileNavOpen = false; mobileShowDetail = false; activeTag = activeTag === label.name ? "" : label.name; virtualFolder = ""; loadEmails(); }}><span class="label-dot" style={"background:" + label.color}></span>{label.name}</button>{/each}</div>
+		<div class="label-nav"><div class="quick-links-heading"><strong>Labels</strong><button class="quick-add" type="button" on:click={createLabel}>+</button></div>{#each labels as label (label.name)}<button class:active={activeTag === label.name} on:click={() => selectTag(label.name)}><span class="label-dot" style={"background:" + label.color}></span>{label.name}</button>{/each}</div>
 		<div class="quick-links">
 			<div class="quick-links-heading"><strong>Quick Links</strong><button class="quick-add" type="button" aria-label="Add quick link" title="Add bookmark" on:click={addQuickLink}>+</button></div>
 			{#each quickLinks as link (link.id)}
@@ -787,7 +911,7 @@
 			<div class="empty-state">Select a message to read</div>
 		{:else}
 			<div class="reading-toolbar">
-				<button class="btn-secondary mobile-back" on:click={() => { mobileShowDetail = false; selectedEmail = null; attachments = []; }} title="Back to messages">← Back</button>
+				<button class="btn-secondary mobile-back" on:click={() => { emailSelectionRequestId += 1; loadingDetail = false; mobileShowDetail = false; selectedEmail = null; attachments = []; }} title="Back to messages">← Back</button>
 				<div class="icon-toolbar reading-actions">
 					<button class="btn-icon" title="Reply" aria-label="Reply" on:click={() => selectedEmail && openReply(selectedEmail)}><svg viewBox="0 0 24 24"><path d="M9 14 4 9l5-5M4 9h10a6 6 0 0 1 6 6v3"/></svg></button>
 					<button class="btn-icon" title="Reply all" aria-label="Reply all" on:click={() => selectedEmail && openReplyAll(selectedEmail)}><svg viewBox="0 0 24 24"><path d="m8 14-5-5 5-5M3 9h9a6 6 0 0 1 6 6v3M15 14l5-5-5-5"/></svg></button>

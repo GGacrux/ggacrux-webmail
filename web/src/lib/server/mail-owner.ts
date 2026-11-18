@@ -22,7 +22,12 @@ export async function ensureMailOwnerColumn(db: D1Database): Promise<void> {
 		SET owner_email = lower(trim(CASE WHEN folder = 'sent' THEN sender_email ELSE recipient_email END))
 		WHERE (owner_email IS NULL OR trim(owner_email) = '') AND folder IN ('inbox', 'sent')
 	`).run();
-	await db.prepare('CREATE INDEX IF NOT EXISTS idx_emails_owner_folder_created ON emails(owner_email, folder, created_at DESC)').run();
+	await db.prepare(`
+		UPDATE emails
+		SET owner_email = lower(trim(owner_email))
+		WHERE owner_email IS NOT NULL AND owner_email != lower(trim(owner_email))
+	`).run();
+	await db.prepare('CREATE INDEX IF NOT EXISTS idx_emails_lower_owner_folder_created ON emails(LOWER(owner_email), folder, created_at DESC)').run();
 	// Legacy Trash rows are intentionally not inferred: their original direction
 	// is unknowable after folder moves, so leaving them unowned prevents disclosure.
 	ownerColumnReady = true;

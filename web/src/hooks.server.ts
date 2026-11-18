@@ -71,8 +71,12 @@ async function verifyAccessIdentity(token: string): Promise<string> {
 }
 
 export const handle: Handle = async ({ event, resolve }) => {
+	const isLogoutRequest = event.url.pathname === '/logout' && event.request.method === 'GET';
 	if (dev) {
 		event.locals.userEmail = 'developer@ggacrux.ca';
+	} else if (isLogoutRequest) {
+		// The logout response must be reachable after the client expires CF_Authorization.
+		event.locals.userEmail = undefined;
 	} else {
 		const token = event.request.headers.get('Cf-Access-Jwt-Assertion') || getCookieJwt(event.request.headers.get('cookie') || '');
 		if (!token) throw error(403, 'Cloudflare Access authentication is required');
