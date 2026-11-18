@@ -16,11 +16,13 @@ export const GET: RequestHandler = async ({ url }) => {
 	const threadId = url.searchParams.get('threadId') || url.searchParams.get('messageId');
 	if (threadId) {
 		const thread = await db.prepare(`
-			WITH RECURSIVE thread(id, message_id) AS (
-				SELECT id, message_id FROM emails WHERE id = ? OR message_id = ?
+			WITH RECURSIVE thread(id, message_id, in_reply_to, references_header) AS (
+				SELECT id, message_id, in_reply_to, references_header FROM emails WHERE id = ? OR message_id = ?
 				UNION
-				SELECT e.id, e.message_id FROM emails e JOIN thread t
-				ON (e.in_reply_to = t.message_id OR (t.message_id IS NOT NULL AND e.references_header LIKE '%' || t.message_id || '%'))
+				SELECT e.id, e.message_id, e.in_reply_to, e.references_header FROM emails e JOIN thread t
+				ON (e.in_reply_to = t.message_id OR t.in_reply_to = e.message_id
+					OR (t.message_id IS NOT NULL AND e.references_header LIKE '%' || t.message_id || '%')
+					OR (e.message_id IS NOT NULL AND t.references_header LIKE '%' || e.message_id || '%'))
 			)
 			SELECT e.* FROM emails e JOIN thread t ON t.id = e.id
 			ORDER BY datetime(e.created_at) ASC, e.id ASC
