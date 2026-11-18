@@ -275,6 +275,7 @@
 		unreadOnly = false;
 		selectedEmail = null;
 		attachments = [];
+		threadMessages = [];
 		selectedIds = [];
 		loadEmails();
 	}
@@ -602,8 +603,13 @@
 		if (event.key === 'Escape') {
 			if (showCompose) {
 				composeMinimized = true;
-			} else if (selectedEmail) {
+			} else if (selectedEmail || loadingDetail) {
+				emailSelectionRequestId += 1;
+				loadingDetail = false;
 				selectedEmail = null;
+				attachments = [];
+				threadMessages = [];
+				mobileShowDetail = false;
 			}
 			return;
 		}
