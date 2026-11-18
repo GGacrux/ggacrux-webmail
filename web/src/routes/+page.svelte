@@ -493,20 +493,12 @@
 		}
 	}
 
-	async function handleLogout(event: MouseEvent) {
+	function handleLogout(event: MouseEvent) {
 		event.preventDefault();
-		try {
-			localStorage.removeItem('ggacrux_draft');
-			localStorage.removeItem('ggacrux_profile');
-		} catch { /* storage may be unavailable */ }
-		document.cookie = 'CF_Authorization=; Path=/; Expires=Thu, 01 Jan 1970 00:00:01 GMT; SameSite=Lax; Secure';
-		document.cookie = 'CF_Authorization=; Path=/; Expires=Thu, 01 Jan 1970 00:00:01 GMT; SameSite=Lax; Secure; Domain=.ggacrux.ca';
-		await fetch('/cdn-cgi/access/logout', {
-			method: 'GET',
-			credentials: 'include',
-			redirect: 'manual'
-		}).catch(() => {});
-		window.location.href = `https://login.microsoftonline.com/common/oauth2/v2.0/logout?post_logout_redirect_uri=${encodeURIComponent(window.location.origin)}`;
+		try { localStorage.clear(); } catch { /* storage may be unavailable */ }
+		try { sessionStorage.clear(); } catch { /* storage may be unavailable */ }
+		document.cookie = 'CF_Authorization=; Path=/; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Secure; SameSite=None';
+		window.location.assign('/logout');
 	}
 
 	function handleKeydown(event: KeyboardEvent) {
