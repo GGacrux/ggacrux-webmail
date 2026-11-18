@@ -519,6 +519,7 @@
 		return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
 	}
 
+	function getEmailTags(email: EmailSummary): string[] { try { return JSON.parse((email as EmailSummary & { tags?: string }).tags || '[]'); } catch { return []; } }
 	function formatBytes(bytes: number): string {
 		if (bytes < 1024) return `${bytes} B`;
 		if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
@@ -590,6 +591,8 @@
 			</button>
 		</nav>
 
+		<div class="smart-views"><strong>Smart Views</strong><button class:active={virtualFolder === "all"} on:click={() => selectVirtualView("all")}>All Mail</button><button class:active={virtualFolder === "attachments"} on:click={() => selectVirtualView("attachments")}>Has Attachments</button>{#each [...new Set(emails.map((mail) => mail.recipient_email).filter(Boolean))] as alias (alias)}<button class:active={virtualFolder === "alias:" + alias} on:click={() => selectVirtualView("alias:" + alias)}>↳ {alias}</button>{/each}</div>
+		<div class="label-nav"><div class="quick-links-heading"><strong>Labels</strong><button class="quick-add" type="button" on:click={createLabel}>+</button></div>{#each labels as label (label.name)}<button class:active={activeTag === label.name} on:click={() => { activeTag = activeTag === label.name ? "" : label.name; virtualFolder = ""; loadEmails(); }}><span class="label-dot" style={"background:" + label.color}></span>{label.name}</button>{/each}</div>
 		<div class="quick-links">
 			<div class="quick-links-heading"><strong>Quick Links</strong><button class="quick-add" type="button" aria-label="Add quick link" title="Add bookmark" on:click={addQuickLink}>+</button></div>
 			{#each quickLinks as link (link.id)}
@@ -597,6 +600,7 @@
 			{/each}
 		</div>
 		<div class="sidebar-footer">
+			{#if storage}<div class="storage-compact"><div><span>Mail DB</span><small>{formatBytes(storage.d1.usedBytes)} / 500 MB</small></div><div class="storage-track"><span class={storageTone(storage.d1.usedBytes, storage.d1.limitBytes)} style={"width:" + storagePercent(storage.d1.usedBytes, storage.d1.limitBytes) + "%"}></span></div><div><span>Attachments</span><small>{formatBytes(storage.r2.usedBytes)} / 10 GB</small></div><div class="storage-track"><span class={storageTone(storage.r2.usedBytes, storage.r2.limitBytes)} style={"width:" + storagePercent(storage.r2.usedBytes, storage.r2.limitBytes) + "%"}></span></div></div>{/if}
 			<button type="button" class="profile-trigger" on:click={() => (showProfile = true)} title="Profile & Appearance">
 				{#if profilePhoto}<img class="profile-avatar" src={profilePhoto} alt="Profile photo" />{:else}<span class="profile-avatar profile-initial">{avatarInitial}</span>{/if}
 				<span class="profile-label"><strong>{profileName || 'Profile'}</strong><small class="user-email" title={userEmail}>{userEmail}</small></span>
@@ -679,6 +683,7 @@
 								<span class="date">{formatDate(item.created_at)}</span>
 							</div>
 							<div class="subject">{item.subject || '(No Subject)'}</div>
+							{#if getEmailTags(item).length}<div class="tag-pills">{#each getEmailTags(item) as tag}<span class="tag-pill" style={"background:" + (labels.find((l) => l.name === tag)?.color || "#64748b")}>{tag}</span>{/each}</div>{/if}
 							<div class="snippet">{item.snippet || ''}</div>
 							</div>
 						</button>
@@ -703,6 +708,7 @@
 					← Back
 				</button>
 				<div class="toolbar-actions">
+					{#each labels as label}<button class="btn-icon" style={"border-color:" + label.color} on:click={() => selectedEmail && toggleEmailTag(selectedEmail, label.name)}>{label.name}</button>{/each}
 					<button class="btn-primary" on:click={() => selectedEmail && openReply(selectedEmail)}>Reply</button>
 					<button class="btn-secondary" on:click={() => selectedEmail && openReplyAll(selectedEmail)}>Reply all</button>
 					<button class="btn-secondary" on:click={() => selectedEmail && openForward(selectedEmail)}>Forward</button>
@@ -733,53 +739,15 @@
 				</div>
 			</div>
 
-			<div class="email-header">
-				<h2>{selectedEmail.subject || '(No Subject)'}</h2>
-				<div class="meta-grid">
-					<div>
-						<strong>From:</strong>
-						{selectedEmail.sender_name
-							? `${selectedEmail.sender_name} <${selectedEmail.sender_email}>`
-							: selectedEmail.sender_email}
-					</div>
-					<div><strong>To:</strong> {selectedEmail.recipient_email}</div>
-					<div>
-						<strong>Date:</strong>
-						{new Date(
-							selectedEmail.created_at.endsWith('Z')
-								? selectedEmail.created_at
-								: selectedEmail.created_at + 'Z'
-						).toLocaleString()}
-					</div>
-				</div>
-
-				{#if attachments.length > 0}
-					<div class="attachments-bar">
-						{#each attachments as att (att.id)}
-							{#if att.r2_key}
-								<a class="attachment-chip" href="/api/attachments/{att.id}" download={att.filename}>
-									📎 {att.filename} ({formatBytes(att.size_bytes)})
-								</a>
-							{:else}
-								<span class="attachment-chip disabled" title="R2 storage not enabled">
-									📎 {att.filename} ({formatBytes(att.size_bytes)} — metadata only)
-								</span>
-							{/if}
-						{/each}
-					</div>
-				{/if}
-			</div>
-
-			<div class="email-body-container">
-				{#if sanitizedSrcDoc}
-					<iframe
-						title="Email content"
-						sandbox="allow-popups allow-popups-to-escape-sandbox"
-						srcdoc={sanitizedSrcDoc}
-					></iframe>
-				{:else}
-					<pre class="plain-body">{selectedEmail.text_body || '(Empty message)'}</pre>
-				{/if}
+			<div class="thread-container">
+				{#each threadMessages.length ? threadMessages : [selectedEmail] as message, index (message.id)}
+					<details class="thread-card" open={index === threadMessages.length - 1 || threadMessages.length === 0}>
+						<summary><strong>{message.sender_name || message.sender_email}</strong><span>{formatDate(message.created_at)}</span><span>{message.subject || '(No Subject)'}</span></summary>
+						<div class="meta-grid"><div><strong>From:</strong> {message.sender_email}</div><div><strong>To:</strong> {message.recipient_email}</div></div>
+						{#if message.attachments?.length}<div class="attachments-bar">{#each message.attachments as att}<a class="attachment-chip" href="/api/attachments/{att.id}" download={att.filename}>📎 {att.filename} ({formatBytes(att.size_bytes)})</a>{/each}</div>{:else if message.id === selectedEmail.id && attachments.length}<div class="attachments-bar">{#each attachments as att}<a class="attachment-chip" href="/api/attachments/{att.id}" download={att.filename}>📎 {att.filename} ({formatBytes(att.size_bytes)})</a>{/each}</div>{/if}
+						{#if message.html_body}<iframe class="thread-frame" title="Email content" sandbox="allow-popups allow-popups-to-escape-sandbox" srcdoc={buildSandboxedEmailHtml(message.html_body)}></iframe>{:else}<pre class="plain-body">{message.text_body || '(Empty message)'}</pre>{/if}
+					</details>
+				{/each}
 			</div>
 		{/if}
 	</main>
@@ -796,10 +764,7 @@
 
 			{#if !composeMinimized}
 			<form on:submit|preventDefault={sendEmail}>
-				<div class="form-row">
-					<label for="fromAlias">From (@ggacrux.ca)</label>
-					<input id="fromAlias" type="email" bind:value={fromAlias} required />
-				</div>
+				<div class="form-row"><label for="fromAlias">From (locked)</label><input id="fromAlias" type="email" value={userEmail} readonly aria-readonly="true" class="locked-field" /></div>
 				<div class="form-row">
 					<label for="fromName">From name</label><input id="fromName" bind:value={fromName} />
 				</div>
@@ -813,10 +778,8 @@
 					<label for="subject">Subject</label>
 					<input id="subject" type="text" placeholder="Subject" bind:value={subject} required />
 				</div>
-				<div class="form-row">
-					<label for="body">Message</label>
-					<textarea id="body" rows="10" bind:value={textBody} required></textarea>
-				</div>
+				<div class="form-row"><label>Message</label><div class="compose-mode"><button type="button" class="btn-icon" class:active-filter={!htmlMode} on:click={() => htmlMode = false}>Visual</button><button type="button" class="btn-icon" class:active-filter={htmlMode} on:click={() => htmlMode = true}>HTML</button></div>{#if !htmlMode}<div class="format-toolbar">{#each [{cmd:"bold",label:"B"},{cmd:"italic",label:"I"},{cmd:"underline",label:"U"},{cmd:"strikeThrough",label:"S"},{cmd:"insertUnorderedList",label:"• List"},{cmd:"insertOrderedList",label:"1. List"},{cmd:"formatBlock",label:"Quote"},{cmd:"createLink",label:"Link"},{cmd:"removeFormat",label:"Clear"}] as action}<button type="button" class="btn-icon" on:click={() => formatCommand(action.cmd)} title={action.cmd}>{action.label}</button>{/each}</div><div bind:this={editorEl} class="rich-editor" contenteditable="true" role="textbox" aria-label="Message body" aria-multiline="true" on:input={updateVisualBody}>{@html htmlBody}</div>{:else}<textarea class="html-source" rows="12" bind:value={htmlBody} on:input={() => textBody = htmlBody.replace(/<[^>]*>/g, " ")}></textarea>{/if}</div>
+				<div class="form-row"><label for="attachments-picker">Attachments (10 MB total)</label><input id="attachments-picker" type="file" multiple on:change={handleFiles} /><div class="file-chips">{#each attachmentFiles as file, index}<span class="attachment-chip">{file.name} · {formatBytes(file.size)} <button type="button" aria-label="Remove {file.name}" on:click={() => removeFile(index)}>×</button></span>{/each}</div>{#if attachmentError}<div class="error-banner">{attachmentError}</div>{/if}</div>
 
 				{#if composeError}
 					<div class="error-banner">{composeError}</div>
@@ -824,7 +787,7 @@
 
 				<div class="modal-footer">
 					<button type="button" class="btn-secondary" on:click={() => (composeMinimized = true)}>Minimize</button>
-					<button type="submit" class="btn-primary" disabled={sending}>
+					<button type="submit" class="btn-primary" disabled={sending || !!attachmentError || attachmentFiles.reduce((sum, file) => sum + file.size, 0) > attachmentLimit}>
 						{sending ? 'Sending...' : 'Send Email'}
 					</button>
 				</div>
@@ -849,7 +812,7 @@
 				<button type="button" class:theme-active={selectedTheme === 'midnight'} on:click={() => changeTheme('midnight')}>Midnight Dark</button>
 				<button type="button" class:theme-active={selectedTheme === 'nordic'} on:click={() => changeTheme('nordic')}>Nordic Blue</button>
 			</div></div>
-			<div class="modal-footer"><button class="btn-primary" type="button" on:click={() => { saveProfile(); showProfile = false; }}>Save changes</button></div>
+			{#if storage}<div class="settings-storage"><h4>Storage usage</h4><p><strong>Mail DB (D1):</strong> {formatBytes(storage.d1.usedBytes)} / 500 MB · {storage.d1.emailCount} emails</p><div class="storage-track"><span class={storageTone(storage.d1.usedBytes, storage.d1.limitBytes)} style={"width:" + storagePercent(storage.d1.usedBytes, storage.d1.limitBytes) + "%"}></span></div><p><strong>Attachments (R2):</strong> {formatBytes(storage.r2.usedBytes)} / 10 GB · {storage.r2.fileCount} files</p><div class="storage-track"><span class={storageTone(storage.r2.usedBytes, storage.r2.limitBytes)} style={"width:" + storagePercent(storage.r2.usedBytes, storage.r2.limitBytes) + "%"}></span></div></div>{/if}<div class="modal-footer"><button class="btn-primary" type="button" on:click={() => { saveProfile(); showProfile = false; }}>Save changes</button></div>
 		</section>
 	</div>
 {/if}
@@ -1418,5 +1381,7 @@
 		.profile-trigger { flex:0 0 auto; }
 		.profile-avatar { width:30px; height:30px; flex-basis:30px; }
 	}
+
+	.smart-views,.label-nav{display:flex;flex-direction:column;gap:3px;padding:4px 2px 10px;border-bottom:1px solid #334155}.smart-views strong,.label-nav .quick-links-heading{color:#e2e8f0;font-size:12px;padding:3px 8px}.smart-views button,.label-nav>button{display:flex;align-items:center;gap:8px;text-align:left;border:0;border-radius:5px;background:transparent;color:#cbd5e1;padding:7px 9px;cursor:pointer;font-size:12px;overflow:hidden;text-overflow:ellipsis}.smart-views button:hover,.label-nav>button:hover,.smart-views button.active,.label-nav>button.active{background:#334155;color:#fff}.label-dot{width:8px;height:8px;border-radius:50%;flex:0 0 8px}.storage-compact{width:100%;display:grid;gap:4px;color:#cbd5e1;font-size:10px}.storage-compact>div:not(.storage-track){display:flex;justify-content:space-between;gap:5px}.storage-compact small{color:#94a3b8;font-size:9px;white-space:nowrap}.storage-track{height:5px;background:#334155;border-radius:8px;overflow:hidden;width:100%}.storage-track span{display:block;height:100%;background:#38bdf8;border-radius:8px}.storage-track span.warning{background:#f59e0b}.storage-track span.danger{background:#ef4444}.tag-pills{display:flex;gap:4px;overflow:hidden}.tag-pill{font-size:10px;color:#fff;border-radius:10px;padding:2px 7px;white-space:nowrap}.thread-container{flex:1;overflow-y:auto;padding:14px;display:grid;align-content:start;gap:10px}.thread-card{border:1px solid var(--border-color);border-radius:8px;background:var(--bg-surface);overflow:hidden}.thread-card summary{display:flex;gap:12px;align-items:center;padding:12px;cursor:pointer;font-size:12px;color:var(--text-secondary)}.thread-card summary strong{color:var(--text-primary)}.thread-card summary span:last-child{margin-left:auto;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:40%}.thread-card .meta-grid{padding:0 12px 10px}.thread-frame{width:100%;min-height:240px;border:0;background:#fff}.locked-field{background:#e2e8f0!important;color:#64748b!important;cursor:not-allowed!important}.compose-mode,.format-toolbar,.file-chips{display:flex;flex-wrap:wrap;gap:5px;margin:5px 0}.rich-editor,.html-source{width:100%;min-height:220px;padding:10px;border:1px solid #cbd5e1;border-radius:6px;background:#fff;color:#0f172a;font:14px/1.5 sans-serif;overflow:auto}.rich-editor:focus{outline:2px solid #60a5fa}.file-chips .attachment-chip button{border:0;background:transparent;cursor:pointer;font-size:16px}.settings-storage{margin-top:18px;padding:12px;border:1px solid var(--border-color);border-radius:8px}.settings-storage p{font-size:12px;color:var(--text-secondary)}
 
 </style>
