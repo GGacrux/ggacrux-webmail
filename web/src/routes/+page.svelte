@@ -495,10 +495,14 @@
 
 	function logoutNow(event: MouseEvent) {
 		event.preventDefault();
-		// Clear every webmail-side cache before leaving the authenticated origin.
-		try { localStorage.clear(); } catch { /* storage may be unavailable */ }
+		// Remove account-specific and legacy client caches before the server expires Access.
+		try {
+			localStorage.removeItem('ggacrux_draft');
+			localStorage.removeItem('ggacrux_profile');
+			localStorage.clear();
+		} catch { /* storage may be unavailable */ }
 		try { sessionStorage.clear(); } catch { /* storage may be unavailable */ }
-		document.cookie = 'CF_Authorization=; Path=/; Expires=Thu, 01 Jan 1970 00:00:01 GMT; SameSite=Lax; Secure';
+		document.cookie = 'CF_Authorization=; Path=/; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Lax; Secure';
 		window.location.href = '/logout';
 	}
 
