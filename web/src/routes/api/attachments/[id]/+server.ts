@@ -1,5 +1,6 @@
 // web/src/routes/api/attachments/[id]/+server.ts
 import { error } from '@sveltejs/kit';
+import { env } from 'cloudflare:workers';
 import type { RequestHandler } from './$types';
 
 export const GET: RequestHandler = async ({ params }) => {
