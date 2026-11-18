@@ -1,5 +1,7 @@
 import PostalMime from 'postal-mime';
 
+const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
+
 export interface Env {
 	DB: D1Database;
 	ggacrux_attachments?: R2Bucket; // Optional: gracefully falls back if R2 is not configured
@@ -14,6 +16,16 @@ export default {
 			const rawEmail = await new Response(message.raw).arrayBuffer();
 			const parser = new PostalMime();
 			const parsed = await parser.parse(rawEmail);
+			const attachmentsForStorage = (parsed.attachments ?? []).map((attachment) => ({
+				attachment,
+				contentBytes: typeof attachment.content === 'string'
+					? new TextEncoder().encode(attachment.content)
+					: new Uint8Array(attachment.content)
+			}));
+			const totalAttachmentBytes = attachmentsForStorage.reduce((total, item) => total + item.contentBytes.byteLength, 0);
+			if (totalAttachmentBytes > MAX_ATTACHMENT_BYTES) {
+				throw new Error('Inbound email attachments exceed the 10 MB per-email limit');
+			}
 
 			// 2. Extract identifiers & threading headers
 			const emailId = crypto.randomUUID();
@@ -56,17 +68,11 @@ export default {
 				.run();
 
 			// 5. Process attachments (upload binary to R2 if available, record metadata in D1)
-			if (parsed.attachments && parsed.attachments.length > 0) {
-				for (const att of parsed.attachments) {
+			if (attachmentsForStorage.length > 0) {
+				for (const { attachment: att, contentBytes } of attachmentsForStorage) {
 					const attId = crypto.randomUUID();
 					const filename = att.filename || `attachment-${attId}`;
 					const contentType = att.mimeType || 'application/octet-stream';
-
-					// Normalize content to ArrayBuffer/Uint8Array
-					const contentBytes =
-						typeof att.content === 'string'
-							? new TextEncoder().encode(att.content)
-							: new Uint8Array(att.content);
 
 					const sizeBytes = contentBytes.byteLength;
 					let r2Key: string | null = null;
