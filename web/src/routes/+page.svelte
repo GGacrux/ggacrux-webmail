@@ -493,17 +493,20 @@
 		}
 	}
 
-	function logoutNow(event: MouseEvent) {
+	async function handleLogout(event: MouseEvent) {
 		event.preventDefault();
-		// Remove account-specific and legacy client caches before the server expires Access.
 		try {
 			localStorage.removeItem('ggacrux_draft');
 			localStorage.removeItem('ggacrux_profile');
-			localStorage.clear();
 		} catch { /* storage may be unavailable */ }
-		try { sessionStorage.clear(); } catch { /* storage may be unavailable */ }
-		document.cookie = 'CF_Authorization=; Path=/; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Lax; Secure';
-		window.location.href = '/logout';
+		document.cookie = 'CF_Authorization=; Path=/; Expires=Thu, 01 Jan 1970 00:00:01 GMT; SameSite=Lax; Secure';
+		document.cookie = 'CF_Authorization=; Path=/; Expires=Thu, 01 Jan 1970 00:00:01 GMT; SameSite=Lax; Secure; Domain=.ggacrux.ca';
+		await fetch('/cdn-cgi/access/logout', {
+			method: 'GET',
+			credentials: 'include',
+			redirect: 'manual'
+		}).catch(() => {});
+		window.location.href = `https://login.microsoftonline.com/common/oauth2/v2.0/logout?post_logout_redirect_uri=${encodeURIComponent(window.location.origin)}`;
 	}
 
 	function handleKeydown(event: KeyboardEvent) {
@@ -668,7 +671,7 @@
 					{#if profilePhoto}<img class="profile-avatar" src={profilePhoto} alt="User avatar" />{:else}<span class="profile-avatar profile-initial">{avatarInitial}</span>{/if}
 					<span class="profile-label"><strong>{profileName || 'Profile'}</strong><small class="user-email" title={userEmail}>{userEmail}</small></span>
 				</button>
-				<a href="/logout" class="btn-logout" on:click={logoutNow}>Log out</a>
+				<a href="/logout" class="btn-logout" on:click={handleLogout}>Log out</a>
 			</div>
 		</div>
 	</aside>
