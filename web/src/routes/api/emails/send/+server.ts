@@ -22,11 +22,51 @@ const recipients = (value: string | string[] | undefined): string[] =>
 		.map((address) => address.trim()).filter(Boolean);
 
 function sanitizeHtml(input: string): string {
-	return input
-		.replace(/<(script|iframe|object|embed)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, '')
-		.replace(/<(script|iframe|object|embed)\b[^>]*\/?>/gi, '')
-		.replace(/\s+on[a-z0-9_-]+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, '')
-		.replace(/\s+srcdoc\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, '');
+	const blocked = /<(script|style|iframe|object|embed|form|input|button|textarea|select|video|audio|svg|math)\b[^>]*>[\s\S]*?<\/\1\s*>/gi;
+	const blockedSingle = /<(script|style|iframe|object|embed|form|input|button|textarea|select|video|audio|svg|math)\b[^>]*\/?>/gi;
+	const allowedTags = new Set(['a','abbr','b','blockquote','br','caption','code','div','em','font','h1','h2','h3','h4','hr','i','li','ol','p','pre','s','span','strong','sub','sup','table','tbody','td','th','thead','tr','u','ul']);
+	const safeCssValue = (property: string, value: string): string => {
+		const clean = value.trim();
+		if (!clean || /url\s*\(|expression\s*\(|javascript:|@import|[<>]/i.test(clean)) return '';
+		if (property === 'color') return /^(#[\da-f]{3,8}|[a-z]{1,24}|rgba?\([\d\s.,%]+\)|hsla?\([\d\s.,%]+\))$/i.test(clean) ? clean : '';
+		if (property === 'font-family') return /^[\w\s,'"-]{1,100}$/.test(clean) ? clean : '';
+		if (property === 'font-size') return /^(\d+(\.\d+)?(px|pt|em|rem|%)|small|medium|large|x-small|x-large)$/i.test(clean) ? clean : '';
+		return '';
+	};
+	const safeStyle = (style: string): string => style.split(';').map((declaration) => {
+		const colon = declaration.indexOf(':');
+		if (colon < 1) return '';
+		const property = declaration.slice(0, colon).trim().toLowerCase();
+		if (!['color','font-family','font-size'].includes(property)) return '';
+		const value = safeCssValue(property, declaration.slice(colon + 1));
+		return value ? property + ':' + value : '';
+	}).filter(Boolean).join(';');
+	let html = input.replace(/<!--[\s\S]*?-->/g, '').replace(blocked, '').replace(blockedSingle, '');
+	html = html.replace(/<\/?([a-z][\w:-]*)\b([^>]*)>/gi, (tag, rawName: string, rawAttributes: string) => {
+		const name = rawName.toLowerCase();
+		if (!allowedTags.has(name)) return '';
+		const closing = /^<\//.test(tag);
+		if (closing) return ['br','hr'].includes(name) ? '' : '</' + name + '>';
+		const attrs: string[] = [];
+		const attributePattern = /([\w:-]+)\s*=\s*("(.*?)"|'(.*?)'|([^\s"'=<>]+))/g;
+		let match: RegExpExecArray | null;
+		while ((match = attributePattern.exec(rawAttributes))) {
+			const key = match[1].toLowerCase();
+			const value = match[3] ?? match[4] ?? match[5] ?? '';
+			if (key.startsWith('on') || key === 'srcdoc' || key === 'id' || key === 'class') continue;
+			if (key === 'style') {
+				const style = safeStyle(value);
+				if (style) attrs.push('style="' + style.replace(/"/g, '&quot;') + '"');
+			} else if (name === 'a' && key === 'href' && /^(https?:|mailto:)/i.test(value.trim())) {
+				attrs.push('href="' + value.replace(/&/g, '&amp;').replace(/"/g, '&quot;') + '"');
+			} else if (key === 'title' || key === 'colspan' || key === 'rowspan' || key === 'align') {
+				attrs.push(key + '="' + value.replace(/&/g, '&amp;').replace(/"/g, '&quot;') + '"');
+			}
+		}
+		if (name === 'a') attrs.push('rel="noopener noreferrer"');
+		return '<' + name + (attrs.length ? ' ' + attrs.join(' ') : '') + '>';
+	});
+	return html;
 }
 
 function htmlToText(html: string): string {
