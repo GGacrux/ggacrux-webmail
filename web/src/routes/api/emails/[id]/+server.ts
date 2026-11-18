@@ -1,7 +1,7 @@
 import { json, error } from '@sveltejs/kit';
 import { env } from 'cloudflare:workers';
 import type { RequestHandler } from './$types';
-import { ensureMailOwnerColumn, requireMailOwner } from '$lib/server/mail-owner';
+import { ensureMailOwnerColumn, requireMailOwner } from '#lib/server/mail-owner';
 
 export const GET: RequestHandler = async ({ params, locals }) => {
 	const db = env.DB;
