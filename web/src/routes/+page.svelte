@@ -493,6 +493,19 @@
 		}
 	}
 
+	function logoutNow(event: MouseEvent) {
+		event.preventDefault();
+		// Remove account-specific and legacy client caches before the server expires Access.
+		try {
+			localStorage.removeItem('ggacrux_draft');
+			localStorage.removeItem('ggacrux_profile');
+			localStorage.clear();
+		} catch { /* storage may be unavailable */ }
+		try { sessionStorage.clear(); } catch { /* storage may be unavailable */ }
+		document.cookie = 'CF_Authorization=; Path=/; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Lax; Secure';
+		window.location.href = '/logout';
+	}
+
 	function handleKeydown(event: KeyboardEvent) {
 		const target = event.target as HTMLElement | null;
 		const isTyping =
@@ -568,6 +581,7 @@
 	}
 
 	onMount(() => {
+		draftKey = 'ggacrux-mail-draft-v1:' + (userEmail || 'unknown').toLowerCase();
 		if (data?.userEmail && data.userEmail.toLowerCase().endsWith('@ggacrux.ca')) {
 			fromAlias = data.userEmail;
 		}
@@ -654,7 +668,7 @@
 					{#if profilePhoto}<img class="profile-avatar" src={profilePhoto} alt="Profile photo" />{:else}<span class="profile-avatar profile-initial">{avatarInitial}</span>{/if}
 					<span class="profile-label"><strong>{profileName || 'Profile'}</strong><small class="user-email" title={userEmail}>{userEmail}</small></span>
 				</button>
-				<a href="/cdn-cgi/access/logout" class="btn-logout">Log out</a>
+				<a href="/logout" class="btn-logout" on:click={logoutNow}>Log out</a>
 			</div>
 		</div>
 	</aside>

@@ -1,4 +1,7 @@
 # web/wrangler.toml
+# Production must define ACCESS_TEAM_DOMAIN (e.g. your-team.cloudflareaccess.com)
+# and ACCESS_AUD (the Access application audience tag) as Worker vars/secrets.
+# The request hook fails closed when either value is missing.
 name = "ggacrux-webmail"
 compatibility_date = "2026-01-01"
 pages_build_output_dir = ".svelte-kit/cloudflare"

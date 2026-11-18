@@ -2,12 +2,14 @@ import PostalMime from 'postal-mime';
 
 export interface Env {
 	DB: D1Database;
-	BUCKET?: R2Bucket; // Optional: gracefully falls back if R2 is not configured
+	ggacrux_attachments?: R2Bucket; // Optional: gracefully falls back if R2 is not configured
 }
 
 export default {
 	async email(message: ForwardableEmailMessage, env: Env, ctx: ExecutionContext): Promise<void> {
 		try {
+			try { await env.DB.prepare('ALTER TABLE emails ADD COLUMN owner_email TEXT').run(); } catch { /* column already exists or another delivery added it */ }
+			await env.DB.prepare("UPDATE emails SET owner_email = lower(trim(CASE WHEN folder = 'sent' THEN sender_email ELSE recipient_email END)) WHERE (owner_email IS NULL OR trim(owner_email) = '') AND folder IN ('inbox', 'sent')").run();
 			// 1. Read the raw MIME stream into an ArrayBuffer and parse it
 			const rawEmail = await new Response(message.raw).arrayBuffer();
 			const parser = new PostalMime();
@@ -24,7 +26,8 @@ export default {
 			// 3. Extract sender & recipient info
 			const senderName = parsed.from?.name || null;
 			const senderEmail = parsed.from?.address || message.from;
-			const recipientEmail = message.to;
+			const recipientEmail = message.to.trim().toLowerCase();
+			if (!/^[^\s@]+@ggacrux\.ca$/i.test(recipientEmail)) throw new Error('Inbound recipient is not a supported GGacrux mailbox');
 			const subject = parsed.subject || '(No Subject)';
 			const textBody = parsed.text || '';
 			const htmlBody = parsed.html || null;
@@ -32,12 +35,13 @@ export default {
 			// 4. Insert the email record into D1
 			await env.DB.prepare(
 				`INSERT INTO emails (
-					id, message_id, in_reply_to, references_header, folder,
+					owner_email, id, message_id, in_reply_to, references_header, folder,
 					sender_name, sender_email, recipient_email, subject,
 					text_body, html_body, is_read
-				) VALUES (?, ?, ?, ?, 'inbox', ?, ?, ?, ?, ?, ?, 0)`
+				) VALUES (?, ?, ?, ?, ?, 'inbox', ?, ?, ?, ?, ?, ?, 0)`
 			)
 				.bind(
+					recipientEmail,
 					emailId,
 					messageId,
 					inReplyTo,
@@ -67,9 +71,9 @@ export default {
 					const sizeBytes = contentBytes.byteLength;
 					let r2Key: string | null = null;
 
-					if (env.BUCKET) {
-						r2Key = `${emailId}/${attId}-${filename}`;
-						await env.BUCKET.put(r2Key, contentBytes, {
+					if (env.ggacrux_attachments) {
+						r2Key = `accounts/${encodeURIComponent(recipientEmail)}/${emailId}/${attId}`;
+						await env.ggacrux_attachments.put(r2Key, contentBytes, {
 							httpMetadata: {
 								contentType,
 								contentDisposition: `attachment; filename="${filename.replace(/"/g, '')}"`
