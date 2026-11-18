@@ -540,6 +540,17 @@
 		}
 	}
 
+	function resizeEmailFrame(event: Event) {
+		const iframe = event.currentTarget as HTMLIFrameElement;
+		try {
+			const doc = iframe.contentDocument;
+			const contentHeight = doc?.documentElement?.scrollHeight || doc?.body?.scrollHeight || 0;
+			iframe.style.height = Math.max(450, contentHeight + 24) + 'px';
+		} catch {
+			iframe.style.height = '450px';
+		}
+	}
+
 	function formatDate(iso: string): string {
 		const d = new Date(iso.endsWith('Z') ? iso : iso + 'Z');
 		const now = new Date();
@@ -803,7 +814,25 @@
 					<label for="subject">Subject</label>
 					<input id="subject" type="text" placeholder="Subject" bind:value={subject} required />
 				</div>
-				<div class="form-row"><label>Message</label><div class="compose-mode"><button type="button" class="btn-icon" class:active-filter={!htmlMode} on:click={() => htmlMode = false}>Visual</button><button type="button" class="btn-icon" class:active-filter={htmlMode} on:click={() => htmlMode = true}>HTML</button></div>{#if !htmlMode}<div class="format-toolbar">{#each [{cmd:"bold",label:"B"},{cmd:"italic",label:"I"},{cmd:"underline",label:"U"},{cmd:"strikeThrough",label:"S"},{cmd:"insertUnorderedList",label:"• List"},{cmd:"insertOrderedList",label:"1. List"},{cmd:"formatBlock",label:"Quote",value:"blockquote"},{cmd:"createLink",label:"Link"},{cmd:"removeFormat",label:"Clear"}] as action}<button type="button" class="btn-icon" on:click={() => formatCommand(action.cmd, action.value)} title={action.cmd}>{action.label}</button>{/each}</div><div bind:this={editorEl} class="rich-editor" contenteditable="true" role="textbox" aria-label="Message body" aria-multiline="true" on:input={updateVisualBody}>{@html htmlBody}</div>{:else}<textarea class="html-source" rows="12" bind:value={htmlBody} on:input={() => textBody = htmlBody.replace(/<[^>]*>/g, " ")}></textarea>{/if}</div>
+				<div class="form-row"><label>Message</label>
+					<div class="format-toolbar" role="toolbar" aria-label="Message formatting">
+						<select aria-label="Font family" title="Font family" on:change={(event) => applyFont(editorEl, (event.currentTarget as HTMLSelectElement).value)}>
+							<option value="Arial">Default</option><option value="Arial, sans-serif">Sans-Serif</option><option value="Georgia, serif">Serif</option><option value="monospace">Monospace</option><option value="Georgia">Georgia</option><option value="Verdana">Verdana</option>
+						</select>
+						<label class="color-control" title="Text color">A<input type="color" aria-label="Text color" on:input={(event) => applyTextColor(editorEl, (event.currentTarget as HTMLInputElement).value)} /></label>
+						<button type="button" class="btn-icon" title="Bold" aria-label="Bold" on:click={() => formatCommand('bold')}><svg viewBox="0 0 24 24"><path d="M7 5h7a4 4 0 0 1 0 8H7zM7 13h8a4 4 0 0 1 0 8H7z"/></svg></button>
+						<button type="button" class="btn-icon" title="Italic" aria-label="Italic" on:click={() => formatCommand('italic')}><svg viewBox="0 0 24 24"><path d="M14 4h6M4 20h6M14 4 10 20"/></svg></button>
+						<button type="button" class="btn-icon" title="Underline" aria-label="Underline" on:click={() => formatCommand('underline')}><svg viewBox="0 0 24 24"><path d="M7 4v7a5 5 0 0 0 10 0V4M5 21h14"/></svg></button>
+						<button type="button" class="btn-icon" title="Strikethrough" aria-label="Strikethrough" on:click={() => formatCommand('strikeThrough')}><svg viewBox="0 0 24 24"><path d="M4 12h16M7 7c0-4 10-4 10 0M7 17c0 4 10 4 10 0"/></svg></button>
+						<button type="button" class="btn-icon" title="Bulleted list" aria-label="Bulleted list" on:click={() => formatCommand('insertUnorderedList')}><svg viewBox="0 0 24 24"><path d="M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01"/></svg></button>
+						<button type="button" class="btn-icon" title="Numbered list" aria-label="Numbered list" on:click={() => formatCommand('insertOrderedList')}><svg viewBox="0 0 24 24"><path d="M10 6h10M10 12h10M10 18h10M4 5h1v3M4 12h2l-2 2h2M4 17h2l-2 2h2"/></svg></button>
+						<button type="button" class="btn-icon" title="Blockquote" aria-label="Blockquote" on:click={() => formatCommand('formatBlock','blockquote')}><svg viewBox="0 0 24 24"><path d="M4 7h7v7H5l-1 4M13 7h7v7h-6l-1 4"/></svg></button>
+						<button type="button" class="btn-icon" title="Insert link" aria-label="Insert link" on:click={() => formatCommand('createLink')}><svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.1 0l3-3a5 5 0 0 0-7.1-7.1l-1.7 1.7M14 11a5 5 0 0 0-7.1 0l-3 3A5 5 0 0 0 11 21.1l1.7-1.7"/></svg></button>
+						<button type="button" class="btn-icon" title="Clear formatting" aria-label="Clear formatting" on:click={() => formatCommand('removeFormat')}><svg viewBox="0 0 24 24"><path d="m4 7 4-4 12 12-4 4zM3 21h18"/></svg></button>
+						<button type="button" class="btn-icon html-toggle" class:active-filter={htmlMode} title="Toggle HTML source" aria-label="Toggle HTML source" on:click={() => { if (!htmlMode) updateVisualBody(); htmlMode = !htmlMode; }}>&lt;&gt;</button>
+					</div>
+					{#if !htmlMode}<div bind:this={editorEl} class="rich-editor" contenteditable="true" role="textbox" aria-label="Message body" aria-multiline="true" on:input={updateVisualBody}>{@html htmlBody}</div>{:else}<textarea class="html-source" rows="12" bind:value={htmlBody} on:input={() => textBody = htmlBody.replace(/<[^>]*>/g, ' ')}></textarea>{/if}
+				</div>
 				<div class="form-row"><label for="attachments-picker">Attachments (10 MB total)</label><input id="attachments-picker" type="file" multiple on:change={handleFiles} /><div class="file-chips">{#each attachmentFiles as file, index}<span class="attachment-chip">{file.name} · {formatBytes(file.size)} <button type="button" aria-label="Remove {file.name}" on:click={() => removeFile(index)}>×</button></span>{/each}</div>{#if attachmentError}<div class="error-banner">{attachmentError}</div>{/if}</div>
 
 				{#if composeError}
@@ -831,7 +860,18 @@
 				<div><label class="field-label" for="profile-photo">Profile picture</label><input id="profile-photo" type="file" accept="image/*" on:change={handleProfilePhoto} /><button class="btn-link" type="button" on:click={() => { profilePhoto = ''; saveProfile(); }}>Remove photo</button></div>
 			</div>
 			<div class="form-row"><label for="profile-name">Display name</label><input id="profile-name" bind:value={profileName} on:input={saveProfile} /></div>
-			<div class="form-row"><label for="profile-signature">Email signature</label><textarea id="profile-signature" rows="5" bind:value={signatureHtml} on:input={saveProfile} placeholder="Kind regards,&#10;Your name"></textarea></div>
+			<div class="form-row"><label for="profile-signature-editor">Email signature</label>
+				<div class="format-toolbar signature-toolbar" role="toolbar" aria-label="Signature formatting">
+					<select aria-label="Signature font family" title="Font family" on:change={(event) => applyFont(signatureEditorEl, (event.currentTarget as HTMLSelectElement).value)}><option value="Arial">Default</option><option value="Arial, sans-serif">Sans-Serif</option><option value="Georgia, serif">Serif</option><option value="monospace">Monospace</option><option value="Georgia">Georgia</option><option value="Verdana">Verdana</option></select>
+					<label class="color-control" title="Signature text color">A<input type="color" aria-label="Signature text color" on:input={(event) => applyTextColor(signatureEditorEl, (event.currentTarget as HTMLInputElement).value)} /></label>
+					<button type="button" class="btn-icon" title="Bold" aria-label="Bold" on:click={() => runEditorCommand(signatureEditorEl,'bold')}><svg viewBox="0 0 24 24"><path d="M7 5h7a4 4 0 0 1 0 8H7zM7 13h8a4 4 0 0 1 0 8H7z"/></svg></button>
+					<button type="button" class="btn-icon" title="Italic" aria-label="Italic" on:click={() => runEditorCommand(signatureEditorEl,'italic')}><svg viewBox="0 0 24 24"><path d="M14 4h6M4 20h6M14 4 10 20"/></svg></button>
+					<button type="button" class="btn-icon" title="Underline" aria-label="Underline" on:click={() => runEditorCommand(signatureEditorEl,'underline')}><svg viewBox="0 0 24 24"><path d="M7 4v7a5 5 0 0 0 10 0V4M5 21h14"/></svg></button>
+					<button type="button" class="btn-icon" title="Insert link" aria-label="Insert link" on:click={() => runEditorCommand(signatureEditorEl,'createLink')}><svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.1 0l3-3a5 5 0 0 0-7.1-7.1l-1.7 1.7M14 11a5 5 0 0 0-7.1 0l-3 3A5 5 0 0 0 11 21.1l1.7-1.7"/></svg></button>
+					<button type="button" class="btn-icon" title="Clear formatting" aria-label="Clear formatting" on:click={() => runEditorCommand(signatureEditorEl,'removeFormat')}><svg viewBox="0 0 24 24"><path d="m4 7 4-4 12 12-4 4zM3 21h18"/></svg></button>
+				</div>
+				<div id="profile-signature-editor" bind:this={signatureEditorEl} class="rich-editor signature-editor" contenteditable="true" role="textbox" aria-label="Rich text email signature" aria-multiline="true" on:input={updateSignature}>{@html signatureHtml}</div>
+			</div>
 			<div class="form-row"><span class="field-label">Theme</span><div class="theme-options">
 				<button type="button" class:theme-active={selectedTheme === 'slate'} on:click={() => changeTheme('slate')}>Slate Light</button>
 				<button type="button" class:theme-active={selectedTheme === 'midnight'} on:click={() => changeTheme('midnight')}>Midnight Dark</button>
