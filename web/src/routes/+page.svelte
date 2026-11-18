@@ -72,6 +72,8 @@
 	let restoredDraft = false;
 	let quickLinks: { id: string; title: string; url: string }[] = [];
 	let showProfile = false;
+	let mobileNavOpen = false;
+	let mobileShowDetail = false;
 	let profileName = 'GGacrux';
 	let profilePhoto = '';
 	let signatureHtml = '';
@@ -216,6 +218,8 @@
 	}
 
 	function switchFolder(nextFolder: 'inbox' | 'sent' | 'trash') {
+		mobileNavOpen = false;
+		mobileShowDetail = false;
 		folder = nextFolder;
 		virtualFolder = ''; activeTag = '';
 		unreadOnly = false;
@@ -226,6 +230,7 @@
 	}
 
 	async function selectEmail(item: EmailSummary) {
+		mobileShowDetail = true;
 		loadingDetail = true;
 		try {
 			const res = await fetch(`/api/emails/${item.id}`);
@@ -369,7 +374,7 @@
 	async function loadStorage() { try { const r = await fetch('/api/storage'); if (r.ok) storage = await r.json(); } catch { /* optional metrics */ } }
 	function storagePercent(bytes: number, limit: number) { return Math.min(100, Math.max(0, bytes / limit * 100)); }
 	function storageTone(bytes: number, limit: number) { const p = storagePercent(bytes, limit); return p > 90 ? 'danger' : p > 75 ? 'warning' : ''; }
-	function selectVirtualView(value: string) { virtualFolder = value; activeTag = ''; selectedEmail = null; threadMessages = []; selectedIds = []; loadEmails(); }
+	function selectVirtualView(value: string) { mobileNavOpen = false; mobileShowDetail = false; virtualFolder = value; activeTag = ''; selectedEmail = null; threadMessages = []; selectedIds = []; loadEmails(); }
 	function createLabel() { const name = prompt('Label name'); if (!name?.trim()) return; const color = prompt('Label color (hex)', '#2563eb') || '#2563eb'; labels = [...labels, { name: name.trim(), color: /^#[0-9a-f]{6}$/i.test(color) ? color : '#2563eb' }]; localStorage.setItem('ggacrux_labels', JSON.stringify(labels)); }
 	async function toggleEmailTag(email: EmailSummary, tag: string) { let current: string[] = []; try { current = JSON.parse((email as EmailSummary & { tags?: string }).tags || '[]'); } catch {} const next = current.includes(tag) ? current.filter((v) => v !== tag) : [...current, tag]; const r = await fetch('/api/emails', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids: [email.id], tags: next }) }); if (!r.ok) { notify('Could not update labels'); return; } (email as EmailSummary & { tags?: string }).tags = JSON.stringify(next); emails = [...emails]; if (selectedEmail?.id === email.id) selectedEmail = { ...selectedEmail, tags: JSON.stringify(next) }; }
 	function handleFiles(event: Event) { const input = event.currentTarget as HTMLInputElement; const next = [...attachmentFiles, ...Array.from(input.files || [])]; if (next.reduce((n, f) => n + f.size, 0) > attachmentLimit) { attachmentError = 'Attachments must total 10 MB or less.'; input.value = ''; return; } attachmentFiles = next; attachmentError = ''; input.value = ''; }
@@ -401,6 +406,7 @@
 	}
 	function signatureBlock() { return signatureHtml.trim() ? '<div>' + signatureHtml + '</div><p><br></p>' : ''; }
 	function openCompose() {
+		mobileNavOpen = false;
 		composeError = '';
 		if (userEmail) fromAlias = userEmail;
 		fromName = profileName || (userEmail.split('@')[0] || 'GGacrux');
@@ -615,8 +621,22 @@
 </svelte:head>
 
 <div class="app-shell">
+	<header class="mobile-header">
+		<div class="mobile-header-brand">
+			<button type="button" class="mobile-menu-button" aria-label="Open navigation" aria-expanded={mobileNavOpen} on:click={() => (mobileNavOpen = true)}>☰</button>
+			<strong>GGacrux Mail</strong>
+			<button type="button" class="sidebar-close" aria-label="Close navigation" on:click={() => (mobileNavOpen = false)}>×</button>
+		</div>
+		<div class="mobile-header-actions">
+			<button type="button" class="btn-primary mobile-compose" on:click={openCompose}>+ Compose</button>
+			<button type="button" class="mobile-avatar-button" aria-label="Profile & Appearance" title="Profile & Appearance" on:click={() => (showProfile = true)}>
+				{#if profilePhoto}<img src={profilePhoto} alt="" />{:else}<span>{avatarInitial}</span>{/if}
+			</button>
+		</div>
+	</header>
+	{#if mobileNavOpen}<button type="button" class="mobile-nav-backdrop" aria-label="Close navigation" on:click={() => (mobileNavOpen = false)}></button>{/if}
 	<!-- Pane 1: Sidebar -->
-	<aside class="sidebar">
+	<aside class="sidebar" class:is-open={mobileNavOpen}>
 		<div class="brand">
 			<span class="logo-dot"></span>
 			<strong>GGacrux Mail</strong>
@@ -642,7 +662,7 @@
 		</nav>
 
 		<div class="smart-views"><strong>Smart Views</strong><button class:active={virtualFolder === "all"} on:click={() => selectVirtualView("all")}>All Mail</button><button class:active={virtualFolder === "attachments"} on:click={() => selectVirtualView("attachments")}>Has Attachments</button>{#each [...new Set(emails.map((mail) => mail.recipient_email).filter(Boolean))] as alias (alias)}<button class:active={virtualFolder === "alias:" + alias} on:click={() => selectVirtualView("alias:" + alias)}>↳ {alias}</button>{/each}</div>
-		<div class="label-nav"><div class="quick-links-heading"><strong>Labels</strong><button class="quick-add" type="button" on:click={createLabel}>+</button></div>{#each labels as label (label.name)}<button class:active={activeTag === label.name} on:click={() => { activeTag = activeTag === label.name ? "" : label.name; virtualFolder = ""; loadEmails(); }}><span class="label-dot" style={"background:" + label.color}></span>{label.name}</button>{/each}</div>
+		<div class="label-nav"><div class="quick-links-heading"><strong>Labels</strong><button class="quick-add" type="button" on:click={createLabel}>+</button></div>{#each labels as label (label.name)}<button class:active={activeTag === label.name} on:click={() => { mobileNavOpen = false; mobileShowDetail = false; activeTag = activeTag === label.name ? "" : label.name; virtualFolder = ""; loadEmails(); }}><span class="label-dot" style={"background:" + label.color}></span>{label.name}</button>{/each}</div>
 		<div class="quick-links">
 			<div class="quick-links-heading"><strong>Quick Links</strong><button class="quick-add" type="button" aria-label="Add quick link" title="Add bookmark" on:click={addQuickLink}>+</button></div>
 			{#each quickLinks as link (link.id)}
@@ -669,7 +689,7 @@
 	</aside>
 
 	<!-- Pane 2: Message List -->
-	<section class="message-list-pane" class:hidden-mobile={selectedEmail !== null}>
+	<section class="message-list-pane" class:mobile-hidden={mobileShowDetail}>
 		<div class="list-header">
 			<input
 				bind:this={searchInputEl}
@@ -760,14 +780,14 @@
 	</section>
 
 	<!-- Pane 3: Reading Pane -->
-	<main class="reading-pane" class:hidden-mobile={selectedEmail === null}>
+	<main class="reading-pane" class:mobile-hidden={!mobileShowDetail}>
 		{#if loadingDetail}
 			<div class="empty-state">Loading conversation...</div>
 		{:else if !selectedEmail}
 			<div class="empty-state">Select a message to read</div>
 		{:else}
 			<div class="reading-toolbar">
-				<button class="btn-secondary mobile-back" on:click={() => (selectedEmail = null)} title="Back to messages">←</button>
+				<button class="btn-secondary mobile-back" on:click={() => { mobileShowDetail = false; selectedEmail = null; attachments = []; }} title="Back to messages">← Back</button>
 				<div class="icon-toolbar reading-actions">
 					<button class="btn-icon" title="Reply" aria-label="Reply" on:click={() => selectedEmail && openReply(selectedEmail)}><svg viewBox="0 0 24 24"><path d="M9 14 4 9l5-5M4 9h10a6 6 0 0 1 6 6v3"/></svg></button>
 					<button class="btn-icon" title="Reply all" aria-label="Reply all" on:click={() => selectedEmail && openReplyAll(selectedEmail)}><svg viewBox="0 0 24 24"><path d="m8 14-5-5 5-5M3 9h9a6 6 0 0 1 6 6v3M15 14l5-5-5-5"/></svg></button>
@@ -1337,46 +1357,8 @@
 		z-index: 60;
 	}
 
-	.mobile-back {
-		display: none;
-	}
-	@media (max-width: 900px) {
-		.app-shell { height: 100dvh; }
-		.sidebar { overflow-x:auto; }
-		.modal-backdrop { padding: 0; align-items: stretch; }
-		.modal, .modal.expanded { width:100%; max-width:none; height:100%; border-radius:0; overflow-y:auto; }
-		.modal.minimized { right:10px; bottom:10px; height:auto; border-radius:10px; }
-		.modal-backdrop:has(.modal.minimized) { padding:0; }
-		.reading-toolbar { align-items:flex-start; flex-direction:column; }
-		.toolbar-actions { width:100%; }
-
-		.app-shell {
-			grid-template-columns: 1fr;
-		}
-		.sidebar {
-			flex-direction: row;
-			align-items: center;
-			padding: 10px;
-		}
-		.nav-folders {
-			flex-direction: row;
-		}
-		.sidebar-footer {
-			margin-top: 0;
-			margin-left: auto;
-			padding-top: 0;
-			border-top: none;
-		}
-		.user-email {
-			display: none;
-		}
-		.hidden-mobile {
-			display: none;
-		}
-		.mobile-back {
-			display: inline-block;
-		}
-	}
+	.mobile-back { display:none; }
+	.mobile-header, .mobile-nav-backdrop, .sidebar-close { display:none; }
 
 	:global(:root), :global(:root[data-theme='slate']) {
 		--bg-app: #f8fafc; --bg-surface: #ffffff; --bg-sidebar: #0f172a;
@@ -1489,6 +1471,109 @@
 		.sidebar-footer { min-width:205px; margin-left:auto; padding-top:8px; border-top:1px solid #334155; }
 		.sidebar-account-row .profile-label { display:flex; }
 		.sidebar-account-row .profile-avatar { width:32px; height:32px; flex-basis:32px; }
+	}
+
+
+	/* Tablet and mobile: compact header, slide-over navigation, master/detail */
+	:global(html), :global(body) { max-width:100%; overflow-x:hidden; }
+	.app-shell { min-width:0; max-width:100%; }
+	.message-list-pane, .reading-pane { min-width:0; width:100%; }
+	.list-header { min-width:0; width:100%; }
+	@media (max-width: 960px) {
+		:global(html), :global(body) { width:100%; overflow-x:hidden; }
+		.app-shell {
+			height:100dvh; width:100%; max-width:100vw; min-width:0;
+			grid-template-columns:minmax(0, 1fr);
+			grid-template-rows:56px minmax(0, 1fr);
+			gap:0; overflow-x:hidden;
+		}
+		.mobile-header {
+			grid-row:1; grid-column:1; height:56px; min-width:0; width:100%;
+			padding:0 12px; background:var(--bg-sidebar); color:#f8fafc;
+			display:flex; align-items:center; justify-content:space-between; gap:10px;
+			position:relative; z-index:20;
+		}
+		.mobile-header-brand, .mobile-header-actions {
+			display:flex; align-items:center; min-width:0; gap:10px;
+		}
+		.mobile-header-brand { flex:1 1 auto; overflow:hidden; }
+		.mobile-header-brand strong { white-space:nowrap; font-size:15px; }
+		.mobile-menu-button {
+			flex:0 0 34px; width:34px; height:34px; border:0; border-radius:6px;
+			background:transparent; color:#fff; font-size:22px; cursor:pointer;
+		}
+		.mobile-header-actions { flex:0 0 auto; gap:9px; }
+		.mobile-compose { white-space:nowrap; flex:0 0 auto; padding:8px 10px; font-size:12px; }
+		.mobile-avatar-button {
+			width:30px; height:30px; flex:0 0 30px; padding:0; border:0; border-radius:50%;
+			overflow:hidden; background:#38bdf8; color:#0f172a; font-weight:700; cursor:pointer;
+			display:flex; align-items:center; justify-content:center;
+		}
+		.mobile-avatar-button img { width:100%; height:100%; object-fit:cover; }
+		.mobile-nav-backdrop {
+			display:block; position:fixed; inset:0; z-index:59; border:0;
+			background:rgba(2,6,23,.55);
+		}
+		.sidebar {
+			position:fixed; top:0; left:0; bottom:0; width:270px;
+			max-width:calc(100vw - 48px); height:100dvh; z-index:60;
+			transform:translateX(-100%); transition:transform .2s ease;
+			overflow-y:auto; overflow-x:hidden; flex-direction:column;
+			align-items:stretch; padding:16px; gap:16px;
+			box-shadow:0 12px 36px rgba(0,0,0,.24);
+		}
+		.sidebar.is-open { transform:translateX(0); }
+		.sidebar .brand { width:100%; }
+		.sidebar-close {
+			margin-left:auto; display:inline-flex; align-items:center; justify-content:center;
+			width:30px; height:30px; border:0; border-radius:6px;
+			background:#1e293b; color:#fff; font-size:22px; cursor:pointer;
+		}
+		.sidebar .compose-btn { width:100%; white-space:nowrap; }
+		.sidebar .nav-folders { flex-direction:column; }
+		.sidebar .sidebar-footer {
+			min-width:0; width:100%; margin:auto 0 0; padding-top:12px;
+			border-top:1px solid #334155; align-items:stretch;
+		}
+		.sidebar .profile-label { display:flex; }
+		.sidebar .profile-avatar { width:32px; height:32px; flex-basis:32px; }
+		.sidebar .user-email { display:block; }
+		.sidebar .quick-links { display:flex; }
+		.message-list-pane, .reading-pane {
+			grid-column:1; grid-row:2; width:100%; min-width:0;
+			max-width:100%; height:100%; overflow:hidden;
+		}
+		.message-list-pane.mobile-hidden, .reading-pane.mobile-hidden { display:none; }
+		.list-header {
+			padding:10px 8px; gap:6px; flex-wrap:nowrap; align-items:center;
+		}
+		.list-header input { flex:1 1 0; width:0; min-width:0; }
+		.list-header .btn-icon { flex:0 0 auto; white-space:nowrap; padding:7px 8px; }
+		.mobile-back {
+			display:inline-flex; align-items:center; justify-content:center;
+			flex:0 0 auto; white-space:nowrap; padding:8px 10px; font-weight:600;
+		}
+		.reading-toolbar {
+			flex-direction:row; align-items:center; justify-content:flex-start;
+			flex-wrap:nowrap; gap:6px; padding:8px; min-width:0;
+		}
+		.reading-actions { flex:1 1 auto; min-width:0; }
+		.tag-selector { flex:0 1 auto; min-width:0; }
+		.tag-selector span { display:none; }
+		.tag-selector select { max-width:94px; }
+	}
+	@media (max-width: 640px) {
+		.modal-backdrop { padding:8px; align-items:center; }
+		.modal, .modal.expanded {
+			width:calc(100vw - 16px); max-width:calc(100vw - 16px);
+			max-height:92vh; height:auto; border-radius:10px; overflow-y:auto;
+		}
+		.modal.expanded { height:92vh; }
+		.modal.minimized {
+			right:8px; bottom:8px; width:min(360px, calc(100vw - 16px));
+			max-width:calc(100vw - 16px); max-height:92vh; height:auto;
+		}
+		.modal-backdrop:has(.modal.minimized) { padding:8px; }
 	}
 
 </style>
