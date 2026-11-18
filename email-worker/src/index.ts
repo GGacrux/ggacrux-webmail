@@ -9,7 +9,7 @@ export default {
 	async email(message: ForwardableEmailMessage, env: Env, ctx: ExecutionContext): Promise<void> {
 		try {
 			try { await env.DB.prepare('ALTER TABLE emails ADD COLUMN owner_email TEXT').run(); } catch { /* column already exists or another delivery added it */ }
-			await env.DB.prepare(\`UPDATE emails SET owner_email = lower(trim(CASE WHEN folder = 'sent' THEN sender_email ELSE recipient_email END)) WHERE owner_email IS NULL OR trim(owner_email) = ''\`).run();
+			await env.DB.prepare("UPDATE emails SET owner_email = lower(trim(CASE WHEN folder = 'sent' THEN sender_email ELSE recipient_email END)) WHERE owner_email IS NULL OR trim(owner_email) = ''").run();
 			// 1. Read the raw MIME stream into an ArrayBuffer and parse it
 			const rawEmail = await new Response(message.raw).arrayBuffer();
 			const parser = new PostalMime();
@@ -27,7 +27,7 @@ export default {
 			const senderName = parsed.from?.name || null;
 			const senderEmail = parsed.from?.address || message.from;
 			const recipientEmail = message.to.trim().toLowerCase();
-			if (!/^[^\\s@]+@ggacrux\\.ca$/i.test(recipientEmail)) throw new Error('Inbound recipient is not a supported GGacrux mailbox');
+			if (!/^[^\s@]+@ggacrux\.ca$/i.test(recipientEmail)) throw new Error('Inbound recipient is not a supported GGacrux mailbox');
 			const subject = parsed.subject || '(No Subject)';
 			const textBody = parsed.text || '';
 			const htmlBody = parsed.html || null;
