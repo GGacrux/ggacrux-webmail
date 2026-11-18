@@ -1,0 +1,30 @@
+import { error } from '@sveltejs/kit';
+
+/**
+ * Adds the ownership column for existing installations and backfills legacy
+ * rows. Inbound mail belongs to its recipient; sent mail belongs to its sender.
+ * The operation is safe to call from every request while deployments roll out.
+ */
+export async function ensureMailOwnerColumn(db: D1Database): Promise<void> {
+	const columns = await db.prepare('PRAGMA table_info(emails)').all<{ name: string }>();
+	if (!(columns.results ?? []).some((column) => column.name === 'owner_email')) {
+		try {
+			await db.prepare('ALTER TABLE emails ADD COLUMN owner_email TEXT').run();
+		} catch {
+			// Another isolate may have added the column concurrently.
+		}
+	}
+	await db.prepare(`
+		UPDATE emails
+		SET owner_email = lower(trim(CASE WHEN folder = 'sent' THEN sender_email ELSE recipient_email END))
+		WHERE owner_email IS NULL OR trim(owner_email) = ''
+	`).run();
+}
+
+export function requireMailOwner(userEmail: string | undefined): string {
+	const owner = (userEmail || '').trim().toLowerCase();
+	if (!owner || !/^[^\\s@]+@ggacrux\\.ca$/i.test(owner)) {
+		throw error(401, 'An authenticated GGacrux account is required');
+	}
+	return owner;
+}
