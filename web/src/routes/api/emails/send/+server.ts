@@ -93,9 +93,8 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	if (!db) throw error(500, 'D1 database binding not available');
 	if (!apiKey) throw error(500, 'RESEND_API_KEY is not configured');
 
-	const authenticated = (locals.userEmail || request.headers.get('Cf-Access-Authenticated-User-Email') || '').trim().toLowerCase();
-	const senderEmail = authenticated || (import.meta.env.DEV ? 'canopus@ggacrux.ca' : '');
-	if (!senderEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(senderEmail)) throw error(401, 'An authenticated sender address is required');
+	const senderEmail = requireMailOwner(locals.userEmail);
+	await ensureMailOwnerColumn(db);
 
 	let payload: SendPayload;
 	const uploads: UploadFile[] = [];
