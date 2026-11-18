@@ -135,7 +135,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	try {
 		for (const item of uploads) {
 			const id = crypto.randomUUID();
-			const r2Key = `emails/${emailId}/${id}`;
+			const r2Key = `accounts/${encodeURIComponent(senderEmail)}/emails/${emailId}/${id}`;
 			const bytes = await item.file.arrayBuffer();
 			await bucket!.put(r2Key, bytes, { httpMetadata: { contentType: item.contentType } });
 			let binary = '';
