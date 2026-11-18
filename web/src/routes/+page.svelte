@@ -665,7 +665,7 @@
 			{/if}
 			<div class="sidebar-account-row">
 				<button type="button" class="profile-trigger" on:click={() => (showProfile = true)} title="Profile & Appearance">
-					{#if profilePhoto}<img class="profile-avatar" src={profilePhoto} alt="Profile photo" />{:else}<span class="profile-avatar profile-initial">{avatarInitial}</span>{/if}
+					{#if profilePhoto}<img class="profile-avatar" src={profilePhoto} alt="User avatar" />{:else}<span class="profile-avatar profile-initial">{avatarInitial}</span>{/if}
 					<span class="profile-label"><strong>{profileName || 'Profile'}</strong><small class="user-email" title={userEmail}>{userEmail}</small></span>
 				</button>
 				<a href="/logout" class="btn-logout" on:click={logoutNow}>Log out</a>
@@ -867,7 +867,7 @@
 
 {#if showProfile}
 	<div class="modal-backdrop settings-backdrop" role="presentation">
-		<section class="modal settings-modal" role="dialog" aria-modal="true" aria-labelledby="profile-title">
+		<div class="modal settings-modal" role="dialog" aria-modal="true" aria-labelledby="profile-title">
 			<div class="modal-header"><h3 id="profile-title">Profile &amp; Appearance</h3><button class="btn-icon" type="button" on:click={() => { saveProfile(); showProfile = false; }}>✕</button></div>
 			<div class="profile-editor">
 				{#if profilePhoto}<img class="profile-preview" src={profilePhoto} alt="Profile preview" />{:else}<span class="profile-preview profile-initial">{avatarInitial}</span>{/if}
@@ -892,7 +892,7 @@
 				<button type="button" class:theme-active={selectedTheme === 'nordic'} on:click={() => changeTheme('nordic')}>Nordic Blue</button>
 			</div></div>
 			{#if storage}<div class="settings-storage"><h4>Storage usage</h4><p><strong>Mail DB (D1):</strong> {formatBytes(storage.d1.usedBytes)} / 500 MB · {storage.d1.emailCount} emails</p><div class="storage-track"><span class={storageTone(storage.d1.usedBytes, storage.d1.limitBytes)} style={"width:" + storagePercent(storage.d1.usedBytes, storage.d1.limitBytes) + "%"}></span></div><p><strong>Attachments (R2):</strong> {formatBytes(storage.r2.usedBytes)} / 10 GB · {storage.r2.fileCount} files</p><div class="storage-track"><span class={storageTone(storage.r2.usedBytes, storage.r2.limitBytes)} style={"width:" + storagePercent(storage.r2.usedBytes, storage.r2.limitBytes) + "%"}></span></div></div>{/if}<div class="modal-footer"><button class="btn-primary" type="button" on:click={() => { saveProfile(); showProfile = false; }}>Save changes</button></div>
-		</section>
+		</div>
 	</div>
 {/if}
 
@@ -1154,10 +1154,6 @@
 		padding: 16px 20px;
 		border-bottom: 1px solid #e2e8f0;
 	}
-	.email-header h2 {
-		margin: 0 0 10px 0;
-		font-size: 18px;
-	}
 	.meta-grid {
 		font-size: 13px;
 		color: #475569;
@@ -1191,11 +1187,6 @@
 		flex: 1;
 		overflow: hidden;
 		display: flex;
-	}
-	.email-body-container iframe {
-		width: 100%;
-		height: 100%;
-		border: none;
 	}
 	.plain-body {
 		margin: 0;
@@ -1363,7 +1354,6 @@
 		.modal-backdrop:has(.modal.minimized) { padding:0; }
 		.reading-toolbar { align-items:flex-start; flex-direction:column; }
 		.toolbar-actions { width:100%; }
-		.toolbar-actions button { flex:1; }
 
 		.app-shell {
 			grid-template-columns: 1fr;
@@ -1448,7 +1438,7 @@
 	.theme-options button { padding:8px 11px; border:1px solid var(--border-color); border-radius:7px; background:var(--bg-surface); color:var(--text-primary); cursor:pointer; }
 	.theme-options button.theme-active { border:2px solid var(--accent-color); background:var(--bg-app); font-weight:700; }
 	.settings-modal { background:var(--bg-surface); color:var(--text-primary); }
-	.settings-modal .form-row input, .settings-modal .form-row textarea { background:var(--bg-surface); color:var(--text-primary); border-color:var(--border-color); }
+	.settings-modal .form-row input { background:var(--bg-surface); color:var(--text-primary); border-color:var(--border-color); }
 	.settings-modal .modal-header { border-color:var(--border-color); }
 	.settings-modal .form-row label { color:var(--text-secondary); }
 	:global(:root[data-theme='midnight']) .list-subbar { color:var(--text-secondary); }
