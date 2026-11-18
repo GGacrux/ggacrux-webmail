@@ -74,7 +74,8 @@
 	let showProfile = false;
 	let profileName = 'GGacrux';
 	let profilePhoto = '';
-	let emailSignature = '';
+	let signatureHtml = '';
+	let signatureEditorEl: HTMLDivElement;
 	let selectedTheme: 'slate' | 'midnight' | 'nordic' = 'slate';
 	$: avatarInitial = (profileName || userEmail || 'G').trim().charAt(0).toUpperCase();
 	let subject = '';
@@ -94,7 +95,7 @@
 
 		fromName = profileName.trim() || (userEmail.split('@')[0] || 'GGacrux');
 
-		localStorage.setItem('ggacrux_profile', JSON.stringify({ displayName: fromName, photo: profilePhoto, signature: emailSignature, theme: selectedTheme }));
+		localStorage.setItem('ggacrux_profile', JSON.stringify({ displayName: fromName, photo: profilePhoto, signatureHtml, theme: selectedTheme }));
 
 	}
 
@@ -104,7 +105,7 @@
 
 		localStorage.setItem('ggacrux_theme', theme);
 
-		localStorage.setItem('ggacrux_profile', JSON.stringify({ displayName: profileName, photo: profilePhoto, signature: emailSignature, theme }));
+		localStorage.setItem('ggacrux_profile', JSON.stringify({ displayName: profileName, photo: profilePhoto, signatureHtml, theme }));
 
 	}
 
@@ -154,7 +155,7 @@
 
 			profilePhoto = canvas.toDataURL('image/webp', 0.82);
 
-			localStorage.setItem('ggacrux_profile', JSON.stringify({ displayName: profileName, photo: profilePhoto, signature: emailSignature, theme: selectedTheme }));
+			localStorage.setItem('ggacrux_profile', JSON.stringify({ displayName: profileName, photo: profilePhoto, signatureHtml, theme: selectedTheme }));
 
 		} catch { notify('Could not process that image'); }
 
@@ -373,13 +374,37 @@
 	async function toggleEmailTag(email: EmailSummary, tag: string) { let current: string[] = []; try { current = JSON.parse((email as EmailSummary & { tags?: string }).tags || '[]'); } catch {} const next = current.includes(tag) ? current.filter((v) => v !== tag) : [...current, tag]; const r = await fetch('/api/emails', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids: [email.id], tags: next }) }); if (!r.ok) { notify('Could not update labels'); return; } (email as EmailSummary & { tags?: string }).tags = JSON.stringify(next); emails = [...emails]; if (selectedEmail?.id === email.id) selectedEmail = { ...selectedEmail, tags: JSON.stringify(next) }; }
 	function handleFiles(event: Event) { const input = event.currentTarget as HTMLInputElement; const next = [...attachmentFiles, ...Array.from(input.files || [])]; if (next.reduce((n, f) => n + f.size, 0) > attachmentLimit) { attachmentError = 'Attachments must total 10 MB or less.'; input.value = ''; return; } attachmentFiles = next; attachmentError = ''; input.value = ''; }
 	function removeFile(index: number) { attachmentFiles = attachmentFiles.filter((_, i) => i !== index); attachmentError = ''; }
-	function formatCommand(command: string, value?: string) { editorEl?.focus(); if (command === 'createLink') { const url = prompt('Link URL'); if (!url) return; document.execCommand(command, false, url); } else document.execCommand(command, false, value); if (editorEl) { htmlBody = editorEl.innerHTML; textBody = editorEl.innerText; } }
+	function runEditorCommand(target: HTMLDivElement | undefined, command: string, value?: string) {
+		target?.focus();
+		if (command === 'createLink') {
+			const url = prompt('Link URL');
+			if (!url || !/^https?:\/\//i.test(url)) return;
+			document.execCommand(command, false, url);
+		} else document.execCommand(command, false, value);
+		if (target === editorEl && editorEl) updateVisualBody();
+		if (target === signatureEditorEl && signatureEditorEl) updateSignature();
+	}
+	function formatCommand(command: string, value?: string) { runEditorCommand(editorEl, command, value); }
 	function updateVisualBody() { if (editorEl) { htmlBody = editorEl.innerHTML; textBody = editorEl.innerText; } }
+	function updateSignature() {
+		if (signatureEditorEl) {
+			signatureHtml = signatureEditorEl.innerHTML;
+			localStorage.setItem('ggacrux_profile', JSON.stringify({ displayName: profileName, photo: profilePhoto, signatureHtml, theme: selectedTheme }));
+		}
+	}
+	function applyFont(target: HTMLDivElement | undefined, font: string) { runEditorCommand(target, 'fontName', font); }
+	function applyTextColor(target: HTMLDivElement | undefined, color: string) { runEditorCommand(target, 'foreColor', color); }
+	function escapeHtml(value: string) { return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
+	function plainTextToHtml(value: string) { return value.split('\n').map(escapeHtml).join('<br>'); }
+	function signatureText() {
+		return signatureHtml.replace(/<br\s*\/?\s*>/gi, '\n').replace(/<\/(p|div|li)>/gi, '\n').replace(/<[^>]*>/g, '').replace(/&nbsp;/gi, ' ').replace(/&amp;/gi, '&').replace(/&lt;/gi, '<').replace(/&gt;/gi, '>').trim();
+	}
+	function signatureBlock() { return signatureHtml.trim() ? '<div>' + signatureHtml + '</div><p><br></p>' : ''; }
 	function openCompose() {
 		composeError = '';
 		if (userEmail) fromAlias = userEmail;
 		fromName = profileName || (userEmail.split('@')[0] || 'GGacrux');
-		if (!restoredDraft) { to = ''; cc = ''; bcc = ''; subject = ''; textBody = emailSignature ? '\n\n' + emailSignature : ''; htmlBody = emailSignature ? '<p>' + emailSignature + '</p>' : ''; }
+		if (!restoredDraft) { to = ''; cc = ''; bcc = ''; subject = ''; textBody = signatureText() ? signatureText() + '\n\n' : ''; htmlBody = signatureBlock(); }
 		composeMinimized = false;
 		composeExpanded = false;
 		showCcBcc = false;
@@ -410,8 +435,8 @@
 			.split('\n')
 			.map((line) => `> ${line}`)
 			.join('\n');
-		textBody = (emailSignature ? emailSignature + '\n\n' : '') + `\n\n--- On ${quotedDate}, ${email.sender_email} wrote: ---\n${quotedText}`;
-		htmlBody = '<p>' + textBody.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>') + '</p>';
+		textBody = (signatureText() ? signatureText() + '\n\n' : '') + '\n\n--- On ' + quotedDate + ', ' + email.sender_email + ' wrote: ---\n' + quotedText;
+		htmlBody = signatureBlock() + '<p>On ' + escapeHtml(quotedDate) + ', ' + escapeHtml(email.sender_email) + ' wrote:</p><blockquote>' + plainTextToHtml(quotedText) + '</blockquote>';
 		fromName = profileName || fromName;
 		showCompose = true;
 	}
@@ -430,8 +455,9 @@
 		fromAlias = userEmail;
 		to = ''; cc = ''; bcc = '';
 		subject = email.subject.toLowerCase().startsWith('fwd:') ? email.subject : `Fwd: ${email.subject}`;
-		textBody = (emailSignature ? emailSignature + '\n\n' : '') + `\n\n---------- Forwarded message ----------\nFrom: ${email.sender_email}\nDate: ${new Date(email.created_at).toLocaleString()}\nSubject: ${email.subject}\nTo: ${email.recipient_email}\n\n${email.text_body || ''}`;
-		htmlBody = '<p>' + textBody.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>') + '</p>';
+		const forwardedText = '---------- Forwarded message ----------\nFrom: ' + email.sender_email + '\nDate: ' + new Date(email.created_at).toLocaleString() + '\nSubject: ' + email.subject + '\nTo: ' + email.recipient_email + '\n\n' + (email.text_body || '');
+		textBody = (signatureText() ? signatureText() + '\n\n' : '') + forwardedText;
+		htmlBody = signatureBlock() + '<p>' + plainTextToHtml(forwardedText) + '</p>';
 		fromName = profileName || fromName;
 		inReplyTo = null; references = null; showCompose = true; composeMinimized = false;
 	}
@@ -445,7 +471,9 @@
 		sending = true;
 		try {
 			const form = new FormData();
-			form.set('fromName', fromName); form.set('to', to); form.set('cc', cc); form.set('bcc', bcc); form.set('subject', subject); form.set('text', textBody); form.set('html', htmlMode ? htmlBody : (editorEl?.innerHTML || htmlBody));
+			const outgoingHtml = htmlMode ? htmlBody : (editorEl?.innerHTML || htmlBody);
+			const outgoingText = htmlMode ? textBody : (editorEl?.innerText || textBody);
+			form.set('fromName', fromName); form.set('to', to); form.set('cc', cc); form.set('bcc', bcc); form.set('subject', subject); form.set('text', outgoingText); form.set('html', outgoingHtml);
 			if (inReplyTo) form.set('inReplyTo', inReplyTo); if (references) form.set('references', references);
 			for (const file of attachmentFiles) form.append('attachments', file, file.name);
 			const res = await fetch('/api/emails/send', { method: 'POST', body: form });
@@ -512,6 +540,17 @@
 		}
 	}
 
+	function resizeEmailFrame(event: Event) {
+		const iframe = event.currentTarget as HTMLIFrameElement;
+		try {
+			const doc = iframe.contentDocument;
+			const contentHeight = doc?.documentElement?.scrollHeight || doc?.body?.scrollHeight || 0;
+			iframe.style.height = Math.max(450, contentHeight + 24) + 'px';
+		} catch {
+			iframe.style.height = '450px';
+		}
+	}
+
 	function formatDate(iso: string): string {
 		const d = new Date(iso.endsWith('Z') ? iso : iso + 'Z');
 		const now = new Date();
@@ -536,7 +575,7 @@
 		try {
 			const profile = JSON.parse(localStorage.getItem('ggacrux_profile') || '{}');
 			profileName = profile.displayName || (userEmail.split('@')[0] || 'GGacrux'); fromName = profileName;
-			profilePhoto = profile.photo || ''; emailSignature = profile.signature || '';
+			profilePhoto = profile.photo || ''; signatureHtml = profile.signatureHtml || (profile.signature ? plainTextToHtml(profile.signature) : '');
 			selectedTheme = profile.theme || localStorage.getItem('ggacrux_theme') || 'slate';
 			document.documentElement.dataset.theme = selectedTheme;
 		} catch { profileName = userEmail.split('@')[0] || 'GGacrux'; }
@@ -602,12 +641,21 @@
 			{/each}
 		</div>
 		<div class="sidebar-footer">
-			{#if storage}<div class="storage-compact"><div><span>Mail DB</span><small>{formatBytes(storage.d1.usedBytes)} / 500 MB</small></div><div class="storage-track"><span class={storageTone(storage.d1.usedBytes, storage.d1.limitBytes)} style={"width:" + storagePercent(storage.d1.usedBytes, storage.d1.limitBytes) + "%"}></span></div><div><span>Attachments</span><small>{formatBytes(storage.r2.usedBytes)} / 10 GB</small></div><div class="storage-track"><span class={storageTone(storage.r2.usedBytes, storage.r2.limitBytes)} style={"width:" + storagePercent(storage.r2.usedBytes, storage.r2.limitBytes) + "%"}></span></div></div>{/if}
-			<button type="button" class="profile-trigger" on:click={() => (showProfile = true)} title="Profile & Appearance">
-				{#if profilePhoto}<img class="profile-avatar" src={profilePhoto} alt="Profile photo" />{:else}<span class="profile-avatar profile-initial">{avatarInitial}</span>{/if}
-				<span class="profile-label"><strong>{profileName || 'Profile'}</strong><small class="user-email" title={userEmail}>{userEmail}</small></span>
-			</button>
-			<a href="/cdn-cgi/access/logout" class="btn-logout">Log out</a>
+			{#if storage}
+				<div class="storage-compact">
+					<div class="storage-usage-label"><span>Mail DB</span><small>{formatBytes(storage.d1.usedBytes)} / 500 MB</small></div>
+					<div class="storage-track"><span class={storageTone(storage.d1.usedBytes, storage.d1.limitBytes)} style={"width:" + storagePercent(storage.d1.usedBytes, storage.d1.limitBytes) + "%"}></span></div>
+					<div class="storage-usage-label"><span>Attachments</span><small>{formatBytes(storage.r2.usedBytes)} / 10 GB</small></div>
+					<div class="storage-track"><span class={storageTone(storage.r2.usedBytes, storage.r2.limitBytes)} style={"width:" + storagePercent(storage.r2.usedBytes, storage.r2.limitBytes) + "%"}></span></div>
+				</div>
+			{/if}
+			<div class="sidebar-account-row">
+				<button type="button" class="profile-trigger" on:click={() => (showProfile = true)} title="Profile & Appearance">
+					{#if profilePhoto}<img class="profile-avatar" src={profilePhoto} alt="Profile photo" />{:else}<span class="profile-avatar profile-initial">{avatarInitial}</span>{/if}
+					<span class="profile-label"><strong>{profileName || 'Profile'}</strong><small class="user-email" title={userEmail}>{userEmail}</small></span>
+				</button>
+				<a href="/cdn-cgi/access/logout" class="btn-logout">Log out</a>
+			</div>
 		</div>
 	</aside>
 
@@ -635,11 +683,15 @@
 		</div>
 
 		{#if selectedIds.length > 0}
-			<div class="list-subbar"><span>{selectedIds.length} selected</span>
-				<button class="btn-link" on:click={() => bulkUpdate('read')}>Mark read</button>
-				<button class="btn-link" on:click={() => bulkUpdate('unread')}>Mark unread</button>
-				<button class="btn-link danger" on:click={() => bulkUpdate('trash')}>Trash</button>
-				<button class="btn-link danger" on:click={() => bulkUpdate('delete')}>Delete permanently</button>
+			<div class="list-subbar bulk-toolbar" aria-label="Bulk message actions">
+				<strong>{selectedIds.length} selected</strong>
+				<div class="icon-toolbar">
+					<button class="btn-icon" title="Mark as read" aria-label="Mark as read" on:click={() => bulkUpdate('read')}><svg viewBox="0 0 24 24"><path d="M4 12l5 5L20 6"/></svg></button>
+					<button class="btn-icon" title="Mark as unread" aria-label="Mark as unread" on:click={() => bulkUpdate('unread')}><svg viewBox="0 0 24 24"><path d="M4 6h16v12H4zM4 7l8 6 8-6"/></svg></button>
+					<button class="btn-icon" title="Move to Trash" aria-label="Move to Trash" on:click={() => bulkUpdate('trash')}><svg viewBox="0 0 24 24"><path d="M3 6h18M8 6V4h8v2m-10 0 1 14h10l1-14M10 10v6m4-6v6"/></svg></button>
+					<button class="btn-icon danger-icon" title="Delete permanently" aria-label="Delete permanently" on:click={() => bulkUpdate('delete')}><svg viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3m-9 0 1 13h10l1-13"/></svg></button>
+					<button class="btn-icon" title="Clear selection" aria-label="Clear selection" on:click={() => selectedIds = []}><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+				</div>
 			</div>
 		{/if}
 		{#if folder === 'inbox' && unreadCount > 0}
@@ -706,40 +758,22 @@
 			<div class="empty-state">Select a message to read</div>
 		{:else}
 			<div class="reading-toolbar">
-				<button class="btn-secondary mobile-back" on:click={() => (selectedEmail = null)}>
-					← Back
-				</button>
-				<div class="toolbar-actions">
-					{#each labels as label}<button class="btn-icon" style={"border-color:" + label.color} on:click={() => selectedEmail && toggleEmailTag(selectedEmail, label.name)}>{label.name}</button>{/each}
-					<button class="btn-primary" on:click={() => selectedEmail && openReply(selectedEmail)}>Reply</button>
-					<button class="btn-secondary" on:click={() => selectedEmail && openReplyAll(selectedEmail)}>Reply all</button>
-					<button class="btn-secondary" on:click={() => selectedEmail && openForward(selectedEmail)}>Forward</button>
-					<button class="btn-secondary" on:click={() => selectedEmail && toggleRead(selectedEmail)}>
-						Mark {selectedEmail.is_read === 1 ? 'Unread' : 'Read'}
-					</button>
+				<button class="btn-secondary mobile-back" on:click={() => (selectedEmail = null)} title="Back to messages">←</button>
+				<div class="icon-toolbar reading-actions">
+					<button class="btn-icon" title="Reply" aria-label="Reply" on:click={() => selectedEmail && openReply(selectedEmail)}><svg viewBox="0 0 24 24"><path d="M9 14 4 9l5-5M4 9h10a6 6 0 0 1 6 6v3"/></svg></button>
+					<button class="btn-icon" title="Reply all" aria-label="Reply all" on:click={() => selectedEmail && openReplyAll(selectedEmail)}><svg viewBox="0 0 24 24"><path d="m8 14-5-5 5-5M3 9h9a6 6 0 0 1 6 6v3M15 14l5-5-5-5"/></svg></button>
+					<button class="btn-icon" title="Forward" aria-label="Forward" on:click={() => selectedEmail && openForward(selectedEmail)}><svg viewBox="0 0 24 24"><path d="m15 4 5 5-5 5M20 9H10a6 6 0 0 0-6 6v3"/></svg></button>
+					<button class="btn-icon" title={selectedEmail.is_read === 1 ? 'Mark unread' : 'Mark read'} aria-label="Toggle read status" on:click={() => selectedEmail && toggleRead(selectedEmail)}><svg viewBox="0 0 24 24"><path d="M4 6h16v12H4zM4 7l8 6 8-6"/></svg></button>
 					{#if selectedEmail.folder !== 'trash'}
-						<button
-							class="btn-secondary"
-							on:click={() => selectedEmail && moveToFolder(selectedEmail.id, 'trash')}
-						>
-							Trash
-						</button>
+						<button class="btn-icon" title="Move to Trash" aria-label="Move to Trash" on:click={() => selectedEmail && moveToFolder(selectedEmail.id, 'trash')}><svg viewBox="0 0 24 24"><path d="M3 6h18M8 6V4h8v2m-10 0 1 14h10l1-14"/></svg></button>
 					{:else}
-						<button
-							class="btn-secondary"
-							on:click={() => selectedEmail && moveToFolder(selectedEmail.id, 'inbox')}
-						>
-							Restore
-						</button>
-						<button
-							class="btn-danger"
-							on:click={() => selectedEmail && permanentDelete(selectedEmail.id)}
-						>
-							Permanent Delete
-						</button>
+						<button class="btn-icon" title="Restore to Inbox" aria-label="Restore to Inbox" on:click={() => selectedEmail && moveToFolder(selectedEmail.id, 'inbox')}><svg viewBox="0 0 24 24"><path d="M4 12h16M12 4l8 8-8 8"/></svg></button>
+						<button class="btn-icon danger-icon" title="Delete permanently" aria-label="Delete permanently" on:click={() => selectedEmail && permanentDelete(selectedEmail.id)}><svg viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3m-9 0 1 13h10l1-13"/></svg></button>
 					{/if}
 				</div>
+				<label class="tag-selector"><span>Labels</span><select aria-label="Labels / Tags" on:change={(event) => selectedEmail && toggleEmailTag(selectedEmail, (event.currentTarget as HTMLSelectElement).value)}><option value="">Add label…</option>{#each labels as label}<option value={label.name}>{label.name}</option>{/each}</select></label>
 			</div>
+			<header class="subject-header">{selectedEmail.subject || '(No Subject)'}</header>
 
 			<div class="thread-container">
 				{#each threadMessages.length ? threadMessages : [selectedEmail] as message, index (message.id)}
@@ -747,7 +781,7 @@
 						<summary><strong>{message.sender_name || message.sender_email}</strong><span>{formatDate(message.created_at)}</span><span>{message.subject || '(No Subject)'}</span></summary>
 						<div class="meta-grid"><div><strong>From:</strong> {message.sender_email}</div><div><strong>To:</strong> {message.recipient_email}</div></div>
 						{#if message.attachments?.length}<div class="attachments-bar">{#each message.attachments as att}<a class="attachment-chip" href="/api/attachments/{att.id}" download={att.filename}>📎 {att.filename} ({formatBytes(att.size_bytes)})</a>{/each}</div>{:else if message.id === selectedEmail.id && attachments.length}<div class="attachments-bar">{#each attachments as att}<a class="attachment-chip" href="/api/attachments/{att.id}" download={att.filename}>📎 {att.filename} ({formatBytes(att.size_bytes)})</a>{/each}</div>{/if}
-						{#if message.html_body}<iframe class="thread-frame" title="Email content" sandbox="allow-popups allow-popups-to-escape-sandbox" srcdoc={buildSandboxedEmailHtml(message.html_body)}></iframe>{:else}<pre class="plain-body">{message.text_body || '(Empty message)'}</pre>{/if}
+						{#if message.html_body}<iframe class="thread-frame" title="Email content" sandbox="allow-popups allow-popups-to-escape-sandbox allow-same-origin" scrolling="no" srcdoc={buildSandboxedEmailHtml(message.html_body)} on:load={resizeEmailFrame}></iframe>{:else}<pre class="plain-body">{message.text_body || '(Empty message)'}</pre>{/if}
 					</details>
 				{/each}
 			</div>
@@ -780,7 +814,25 @@
 					<label for="subject">Subject</label>
 					<input id="subject" type="text" placeholder="Subject" bind:value={subject} required />
 				</div>
-				<div class="form-row"><label>Message</label><div class="compose-mode"><button type="button" class="btn-icon" class:active-filter={!htmlMode} on:click={() => htmlMode = false}>Visual</button><button type="button" class="btn-icon" class:active-filter={htmlMode} on:click={() => htmlMode = true}>HTML</button></div>{#if !htmlMode}<div class="format-toolbar">{#each [{cmd:"bold",label:"B"},{cmd:"italic",label:"I"},{cmd:"underline",label:"U"},{cmd:"strikeThrough",label:"S"},{cmd:"insertUnorderedList",label:"• List"},{cmd:"insertOrderedList",label:"1. List"},{cmd:"formatBlock",label:"Quote",value:"blockquote"},{cmd:"createLink",label:"Link"},{cmd:"removeFormat",label:"Clear"}] as action}<button type="button" class="btn-icon" on:click={() => formatCommand(action.cmd, action.value)} title={action.cmd}>{action.label}</button>{/each}</div><div bind:this={editorEl} class="rich-editor" contenteditable="true" role="textbox" aria-label="Message body" aria-multiline="true" on:input={updateVisualBody}>{@html htmlBody}</div>{:else}<textarea class="html-source" rows="12" bind:value={htmlBody} on:input={() => textBody = htmlBody.replace(/<[^>]*>/g, " ")}></textarea>{/if}</div>
+				<div class="form-row"><span class="field-label">Message</span>
+					<div class="format-toolbar" role="toolbar" aria-label="Message formatting">
+						<select aria-label="Font family" title="Font family" on:change={(event) => applyFont(editorEl, (event.currentTarget as HTMLSelectElement).value)}>
+							<option value="Arial">Default</option><option value="Arial, sans-serif">Sans-Serif</option><option value="Georgia, serif">Serif</option><option value="monospace">Monospace</option><option value="Georgia">Georgia</option><option value="Verdana">Verdana</option>
+						</select>
+						<label class="color-control" title="Text color">A<input type="color" aria-label="Text color" on:input={(event) => applyTextColor(editorEl, (event.currentTarget as HTMLInputElement).value)} /></label>
+						<button type="button" class="btn-icon" title="Bold" aria-label="Bold" on:click={() => formatCommand('bold')}><svg viewBox="0 0 24 24"><path d="M7 5h7a4 4 0 0 1 0 8H7zM7 13h8a4 4 0 0 1 0 8H7z"/></svg></button>
+						<button type="button" class="btn-icon" title="Italic" aria-label="Italic" on:click={() => formatCommand('italic')}><svg viewBox="0 0 24 24"><path d="M14 4h6M4 20h6M14 4 10 20"/></svg></button>
+						<button type="button" class="btn-icon" title="Underline" aria-label="Underline" on:click={() => formatCommand('underline')}><svg viewBox="0 0 24 24"><path d="M7 4v7a5 5 0 0 0 10 0V4M5 21h14"/></svg></button>
+						<button type="button" class="btn-icon" title="Strikethrough" aria-label="Strikethrough" on:click={() => formatCommand('strikeThrough')}><svg viewBox="0 0 24 24"><path d="M4 12h16M7 7c0-4 10-4 10 0M7 17c0 4 10 4 10 0"/></svg></button>
+						<button type="button" class="btn-icon" title="Bulleted list" aria-label="Bulleted list" on:click={() => formatCommand('insertUnorderedList')}><svg viewBox="0 0 24 24"><path d="M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01"/></svg></button>
+						<button type="button" class="btn-icon" title="Numbered list" aria-label="Numbered list" on:click={() => formatCommand('insertOrderedList')}><svg viewBox="0 0 24 24"><path d="M10 6h10M10 12h10M10 18h10M4 5h1v3M4 12h2l-2 2h2M4 17h2l-2 2h2"/></svg></button>
+						<button type="button" class="btn-icon" title="Blockquote" aria-label="Blockquote" on:click={() => formatCommand('formatBlock','blockquote')}><svg viewBox="0 0 24 24"><path d="M4 7h7v7H5l-1 4M13 7h7v7h-6l-1 4"/></svg></button>
+						<button type="button" class="btn-icon" title="Insert link" aria-label="Insert link" on:click={() => formatCommand('createLink')}><svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.1 0l3-3a5 5 0 0 0-7.1-7.1l-1.7 1.7M14 11a5 5 0 0 0-7.1 0l-3 3A5 5 0 0 0 11 21.1l1.7-1.7"/></svg></button>
+						<button type="button" class="btn-icon" title="Clear formatting" aria-label="Clear formatting" on:click={() => formatCommand('removeFormat')}><svg viewBox="0 0 24 24"><path d="m4 7 4-4 12 12-4 4zM3 21h18"/></svg></button>
+						<button type="button" class="btn-icon html-toggle" class:active-filter={htmlMode} title="Toggle HTML source" aria-label="Toggle HTML source" on:click={() => { if (!htmlMode) updateVisualBody(); htmlMode = !htmlMode; }}>&lt;&gt;</button>
+					</div>
+					{#if !htmlMode}<div bind:this={editorEl} class="rich-editor" contenteditable="true" role="textbox" aria-label="Message body" aria-multiline="true" on:input={updateVisualBody}>{@html htmlBody}</div>{:else}<textarea class="html-source" rows="12" bind:value={htmlBody} on:input={() => textBody = htmlBody.replace(/<[^>]*>/g, ' ')}></textarea>{/if}
+				</div>
 				<div class="form-row"><label for="attachments-picker">Attachments (10 MB total)</label><input id="attachments-picker" type="file" multiple on:change={handleFiles} /><div class="file-chips">{#each attachmentFiles as file, index}<span class="attachment-chip">{file.name} · {formatBytes(file.size)} <button type="button" aria-label="Remove {file.name}" on:click={() => removeFile(index)}>×</button></span>{/each}</div>{#if attachmentError}<div class="error-banner">{attachmentError}</div>{/if}</div>
 
 				{#if composeError}
@@ -808,7 +860,18 @@
 				<div><label class="field-label" for="profile-photo">Profile picture</label><input id="profile-photo" type="file" accept="image/*" on:change={handleProfilePhoto} /><button class="btn-link" type="button" on:click={() => { profilePhoto = ''; saveProfile(); }}>Remove photo</button></div>
 			</div>
 			<div class="form-row"><label for="profile-name">Display name</label><input id="profile-name" bind:value={profileName} on:input={saveProfile} /></div>
-			<div class="form-row"><label for="profile-signature">Email signature</label><textarea id="profile-signature" rows="5" bind:value={emailSignature} on:input={saveProfile} placeholder="Kind regards,&#10;Your name"></textarea></div>
+			<div class="form-row"><span class="field-label">Email signature</span>
+				<div class="format-toolbar signature-toolbar" role="toolbar" aria-label="Signature formatting">
+					<select aria-label="Signature font family" title="Font family" on:change={(event) => applyFont(signatureEditorEl, (event.currentTarget as HTMLSelectElement).value)}><option value="Arial">Default</option><option value="Arial, sans-serif">Sans-Serif</option><option value="Georgia, serif">Serif</option><option value="monospace">Monospace</option><option value="Georgia">Georgia</option><option value="Verdana">Verdana</option></select>
+					<label class="color-control" title="Signature text color">A<input type="color" aria-label="Signature text color" on:input={(event) => applyTextColor(signatureEditorEl, (event.currentTarget as HTMLInputElement).value)} /></label>
+					<button type="button" class="btn-icon" title="Bold" aria-label="Bold" on:click={() => runEditorCommand(signatureEditorEl,'bold')}><svg viewBox="0 0 24 24"><path d="M7 5h7a4 4 0 0 1 0 8H7zM7 13h8a4 4 0 0 1 0 8H7z"/></svg></button>
+					<button type="button" class="btn-icon" title="Italic" aria-label="Italic" on:click={() => runEditorCommand(signatureEditorEl,'italic')}><svg viewBox="0 0 24 24"><path d="M14 4h6M4 20h6M14 4 10 20"/></svg></button>
+					<button type="button" class="btn-icon" title="Underline" aria-label="Underline" on:click={() => runEditorCommand(signatureEditorEl,'underline')}><svg viewBox="0 0 24 24"><path d="M7 4v7a5 5 0 0 0 10 0V4M5 21h14"/></svg></button>
+					<button type="button" class="btn-icon" title="Insert link" aria-label="Insert link" on:click={() => runEditorCommand(signatureEditorEl,'createLink')}><svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.1 0l3-3a5 5 0 0 0-7.1-7.1l-1.7 1.7M14 11a5 5 0 0 0-7.1 0l-3 3A5 5 0 0 0 11 21.1l1.7-1.7"/></svg></button>
+					<button type="button" class="btn-icon" title="Clear formatting" aria-label="Clear formatting" on:click={() => runEditorCommand(signatureEditorEl,'removeFormat')}><svg viewBox="0 0 24 24"><path d="m4 7 4-4 12 12-4 4zM3 21h18"/></svg></button>
+				</div>
+				<div id="profile-signature-editor" bind:this={signatureEditorEl} class="rich-editor signature-editor" contenteditable="true" role="textbox" aria-label="Rich text email signature" aria-multiline="true" on:input={updateSignature}>{@html signatureHtml}</div>
+			</div>
 			<div class="form-row"><span class="field-label">Theme</span><div class="theme-options">
 				<button type="button" class:theme-active={selectedTheme === 'slate'} on:click={() => changeTheme('slate')}>Slate Light</button>
 				<button type="button" class:theme-active={selectedTheme === 'midnight'} on:click={() => changeTheme('midnight')}>Midnight Dark</button>
@@ -1385,5 +1448,48 @@
 	}
 
 	.smart-views,.label-nav{display:flex;flex-direction:column;gap:3px;padding:4px 2px 10px;border-bottom:1px solid #334155}.smart-views strong,.label-nav .quick-links-heading{color:#e2e8f0;font-size:12px;padding:3px 8px}.smart-views button,.label-nav>button{display:flex;align-items:center;gap:8px;text-align:left;border:0;border-radius:5px;background:transparent;color:#cbd5e1;padding:7px 9px;cursor:pointer;font-size:12px;overflow:hidden;text-overflow:ellipsis}.smart-views button:hover,.label-nav>button:hover,.smart-views button.active,.label-nav>button.active{background:#334155;color:#fff}.label-dot{width:8px;height:8px;border-radius:50%;flex:0 0 8px}.storage-compact{width:100%;display:grid;gap:4px;color:#cbd5e1;font-size:10px}.storage-compact>div:not(.storage-track){display:flex;justify-content:space-between;gap:5px}.storage-compact small{color:#94a3b8;font-size:9px;white-space:nowrap}.storage-track{height:5px;background:#334155;border-radius:8px;overflow:hidden;width:100%}.storage-track span{display:block;height:100%;background:#38bdf8;border-radius:8px}.storage-track span.warning{background:#f59e0b}.storage-track span.danger{background:#ef4444}.tag-pills{display:flex;gap:4px;overflow:hidden}.tag-pill{font-size:10px;color:#fff;border-radius:10px;padding:2px 7px;white-space:nowrap}.thread-container{flex:1;overflow-y:auto;padding:14px;display:grid;align-content:start;gap:10px}.thread-card{border:1px solid var(--border-color);border-radius:8px;background:var(--bg-surface);overflow:hidden}.thread-card summary{display:flex;gap:12px;align-items:center;padding:12px;cursor:pointer;font-size:12px;color:var(--text-secondary)}.thread-card summary strong{color:var(--text-primary)}.thread-card summary span:last-child{margin-left:auto;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:40%}.thread-card .meta-grid{padding:0 12px 10px}.thread-frame{width:100%;min-height:240px;border:0;background:#fff}.locked-field{background:#e2e8f0!important;color:#64748b!important;cursor:not-allowed!important}.compose-mode,.format-toolbar,.file-chips{display:flex;flex-wrap:wrap;gap:5px;margin:5px 0}.rich-editor,.html-source{width:100%;min-height:220px;padding:10px;border:1px solid #cbd5e1;border-radius:6px;background:#fff;color:#0f172a;font:14px/1.5 sans-serif;overflow:auto}.rich-editor:focus{outline:2px solid #60a5fa}.file-chips .attachment-chip button{border:0;background:transparent;cursor:pointer;font-size:16px}.settings-storage{margin-top:18px;padding:12px;border:1px solid var(--border-color);border-radius:8px}.settings-storage p{font-size:12px;color:var(--text-secondary)}
+
+
+	/* Unified one-line icon toolbars and resilient reading pane */
+	.icon-toolbar { display:flex; flex-wrap:nowrap; align-items:center; gap:4px; white-space:nowrap; min-width:0; }
+	.icon-toolbar .btn-icon,.format-toolbar .btn-icon { width:32px; height:32px; padding:7px; flex:0 0 32px; display:inline-flex; align-items:center; justify-content:center; }
+	.icon-toolbar svg,.format-toolbar svg { width:16px; height:16px; fill:none; stroke:currentColor; stroke-width:2; stroke-linecap:round; stroke-linejoin:round; }
+	.bulk-toolbar { display:flex; flex-wrap:nowrap; align-items:center; justify-content:flex-start; gap:8px; overflow-x:auto; white-space:nowrap; }
+	.bulk-toolbar strong { flex:0 0 auto; }
+	.reading-toolbar { flex-wrap:nowrap; min-width:0; }
+	.reading-actions { overflow-x:auto; scrollbar-width:none; }
+	.reading-actions::-webkit-scrollbar { display:none; }
+	.tag-selector { display:flex; flex:0 0 auto; align-items:center; gap:6px; white-space:nowrap; font-size:12px; }
+	.tag-selector select { max-width:130px; min-width:0; padding:6px; border:1px solid var(--border-color); border-radius:6px; background:var(--bg-surface); color:var(--text-primary); }
+	.subject-header { flex:0 0 auto; padding:16px 20px; border-bottom:1px solid var(--border-color); font-size:1.25rem; font-weight:600; line-height:1.35; overflow-wrap:anywhere; }
+	.thread-container { display:flex; flex:1 1 auto; flex-direction:column; height:100%; min-height:0; overflow-y:auto; overflow-x:hidden; gap:10px; }
+	.thread-card { flex:0 0 auto; overflow:visible; }
+	.thread-frame { display:block; width:100%; height:450px; min-height:450px; border:0; background:#fff; flex:0 0 auto; }
+	.sidebar-footer { display:flex; flex-direction:column; align-items:stretch; gap:10px; min-width:0; }
+	.storage-compact { display:grid; gap:4px; width:100%; white-space:nowrap; }
+	.storage-usage-label { display:flex; align-items:center; justify-content:space-between; gap:8px; min-width:0; white-space:nowrap; }
+	.storage-usage-label span,.storage-usage-label small { overflow:hidden; text-overflow:ellipsis; }
+	.sidebar-account-row { display:flex; align-items:center; justify-content:space-between; gap:8px; min-width:0; padding-top:8px; border-top:1px solid #334155; }
+	.sidebar-account-row .profile-trigger { flex:1; min-width:0; display:flex; align-items:center; gap:8px; cursor:pointer; }
+	.sidebar-account-row .btn-logout { flex-shrink:0; }
+	.profile-avatar { width:32px; height:32px; flex:0 0 32px; }
+	.profile-label { min-width:0; flex:1; }
+	.profile-label strong,.profile-label small { display:block; max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+	.format-toolbar { display:flex; flex-wrap:nowrap; align-items:center; gap:4px; margin:5px 0; overflow-x:auto; scrollbar-width:none; white-space:nowrap; min-width:0; }
+	.format-toolbar::-webkit-scrollbar { display:none; }
+	.format-toolbar select { height:32px; max-width:150px; flex:0 0 auto; border:1px solid #cbd5e1; border-radius:6px; padding:4px 6px; background:#fff; color:#0f172a; font-size:12px; }
+	.color-control { position:relative; display:inline-flex; align-items:center; justify-content:center; width:32px; height:32px; flex:0 0 32px; border:1px solid #cbd5e1; border-radius:6px; background:#f1f5f9; color:#0f172a; font-weight:700; cursor:pointer; }
+	.color-control input { position:absolute; inset:0; width:100%; height:100%; opacity:0; cursor:pointer; padding:0!important; }
+	.html-toggle { margin-left:auto; flex:0 0 auto; }
+	.signature-editor { min-height:110px; }
+	.signature-toolbar { margin-bottom:6px; }
+	.danger-icon { color:#dc2626; }
+	@media (max-width:900px) {
+		.reading-toolbar { flex-direction:row; align-items:center; }
+		.reading-actions { flex:1 1 auto; }
+		.sidebar-footer { min-width:205px; margin-left:auto; padding-top:8px; border-top:1px solid #334155; }
+		.sidebar-account-row .profile-label { display:flex; }
+		.sidebar-account-row .profile-avatar { width:32px; height:32px; flex-basis:32px; }
+	}
 
 </style>
