@@ -74,7 +74,8 @@
 	let showProfile = false;
 	let profileName = 'GGacrux';
 	let profilePhoto = '';
-	let emailSignature = '';
+	let signatureHtml = '';
+	let signatureEditorEl: HTMLDivElement;
 	let selectedTheme: 'slate' | 'midnight' | 'nordic' = 'slate';
 	$: avatarInitial = (profileName || userEmail || 'G').trim().charAt(0).toUpperCase();
 	let subject = '';
@@ -94,7 +95,7 @@
 
 		fromName = profileName.trim() || (userEmail.split('@')[0] || 'GGacrux');
 
-		localStorage.setItem('ggacrux_profile', JSON.stringify({ displayName: fromName, photo: profilePhoto, signature: emailSignature, theme: selectedTheme }));
+		localStorage.setItem('ggacrux_profile', JSON.stringify({ displayName: fromName, photo: profilePhoto, signatureHtml, theme: selectedTheme }));
 
 	}
 
@@ -104,7 +105,7 @@
 
 		localStorage.setItem('ggacrux_theme', theme);
 
-		localStorage.setItem('ggacrux_profile', JSON.stringify({ displayName: profileName, photo: profilePhoto, signature: emailSignature, theme }));
+		localStorage.setItem('ggacrux_profile', JSON.stringify({ displayName: profileName, photo: profilePhoto, signatureHtml, theme }));
 
 	}
 
@@ -154,7 +155,7 @@
 
 			profilePhoto = canvas.toDataURL('image/webp', 0.82);
 
-			localStorage.setItem('ggacrux_profile', JSON.stringify({ displayName: profileName, photo: profilePhoto, signature: emailSignature, theme: selectedTheme }));
+			localStorage.setItem('ggacrux_profile', JSON.stringify({ displayName: profileName, photo: profilePhoto, signatureHtml, theme: selectedTheme }));
 
 		} catch { notify('Could not process that image'); }
 
@@ -373,13 +374,37 @@
 	async function toggleEmailTag(email: EmailSummary, tag: string) { let current: string[] = []; try { current = JSON.parse((email as EmailSummary & { tags?: string }).tags || '[]'); } catch {} const next = current.includes(tag) ? current.filter((v) => v !== tag) : [...current, tag]; const r = await fetch('/api/emails', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids: [email.id], tags: next }) }); if (!r.ok) { notify('Could not update labels'); return; } (email as EmailSummary & { tags?: string }).tags = JSON.stringify(next); emails = [...emails]; if (selectedEmail?.id === email.id) selectedEmail = { ...selectedEmail, tags: JSON.stringify(next) }; }
 	function handleFiles(event: Event) { const input = event.currentTarget as HTMLInputElement; const next = [...attachmentFiles, ...Array.from(input.files || [])]; if (next.reduce((n, f) => n + f.size, 0) > attachmentLimit) { attachmentError = 'Attachments must total 10 MB or less.'; input.value = ''; return; } attachmentFiles = next; attachmentError = ''; input.value = ''; }
 	function removeFile(index: number) { attachmentFiles = attachmentFiles.filter((_, i) => i !== index); attachmentError = ''; }
-	function formatCommand(command: string, value?: string) { editorEl?.focus(); if (command === 'createLink') { const url = prompt('Link URL'); if (!url) return; document.execCommand(command, false, url); } else document.execCommand(command, false, value); if (editorEl) { htmlBody = editorEl.innerHTML; textBody = editorEl.innerText; } }
+	function runEditorCommand(target: HTMLDivElement | undefined, command: string, value?: string) {
+		target?.focus();
+		if (command === 'createLink') {
+			const url = prompt('Link URL');
+			if (!url || !/^https?:\/\//i.test(url)) return;
+			document.execCommand(command, false, url);
+		} else document.execCommand(command, false, value);
+		if (target === editorEl && editorEl) updateVisualBody();
+		if (target === signatureEditorEl && signatureEditorEl) updateSignature();
+	}
+	function formatCommand(command: string, value?: string) { runEditorCommand(editorEl, command, value); }
 	function updateVisualBody() { if (editorEl) { htmlBody = editorEl.innerHTML; textBody = editorEl.innerText; } }
+	function updateSignature() {
+		if (signatureEditorEl) {
+			signatureHtml = signatureEditorEl.innerHTML;
+			localStorage.setItem('ggacrux_profile', JSON.stringify({ displayName: profileName, photo: profilePhoto, signatureHtml, theme: selectedTheme }));
+		}
+	}
+	function applyFont(target: HTMLDivElement | undefined, font: string) { runEditorCommand(target, 'fontName', font); }
+	function applyTextColor(target: HTMLDivElement | undefined, color: string) { runEditorCommand(target, 'foreColor', color); }
+	function escapeHtml(value: string) { return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
+	function plainTextToHtml(value: string) { return value.split('\n').map(escapeHtml).join('<br>'); }
+	function signatureText() {
+		return signatureHtml.replace(/<br\s*\/?\s*>/gi, '\n').replace(/<\/(p|div|li)>/gi, '\n').replace(/<[^>]*>/g, '').replace(/&nbsp;/gi, ' ').replace(/&amp;/gi, '&').replace(/&lt;/gi, '<').replace(/&gt;/gi, '>').trim();
+	}
+	function signatureBlock() { return signatureHtml.trim() ? '<div>' + signatureHtml + '</div><p><br></p>' : ''; }
 	function openCompose() {
 		composeError = '';
 		if (userEmail) fromAlias = userEmail;
 		fromName = profileName || (userEmail.split('@')[0] || 'GGacrux');
-		if (!restoredDraft) { to = ''; cc = ''; bcc = ''; subject = ''; textBody = emailSignature ? '\n\n' + emailSignature : ''; htmlBody = emailSignature ? '<p>' + emailSignature + '</p>' : ''; }
+		if (!restoredDraft) { to = ''; cc = ''; bcc = ''; subject = ''; textBody = signatureText() ? signatureText() + '\n\n' : ''; htmlBody = signatureBlock(); }
 		composeMinimized = false;
 		composeExpanded = false;
 		showCcBcc = false;
@@ -410,8 +435,8 @@
 			.split('\n')
 			.map((line) => `> ${line}`)
 			.join('\n');
-		textBody = (emailSignature ? emailSignature + '\n\n' : '') + `\n\n--- On ${quotedDate}, ${email.sender_email} wrote: ---\n${quotedText}`;
-		htmlBody = '<p>' + textBody.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>') + '</p>';
+		textBody = (signatureText() ? signatureText() + '\n\n' : '') + '\n\n--- On ' + quotedDate + ', ' + email.sender_email + ' wrote: ---\n' + quotedText;
+		htmlBody = signatureBlock() + '<p>On ' + escapeHtml(quotedDate) + ', ' + escapeHtml(email.sender_email) + ' wrote:</p><blockquote>' + plainTextToHtml(quotedText) + '</blockquote>';
 		fromName = profileName || fromName;
 		showCompose = true;
 	}
@@ -430,8 +455,9 @@
 		fromAlias = userEmail;
 		to = ''; cc = ''; bcc = '';
 		subject = email.subject.toLowerCase().startsWith('fwd:') ? email.subject : `Fwd: ${email.subject}`;
-		textBody = (emailSignature ? emailSignature + '\n\n' : '') + `\n\n---------- Forwarded message ----------\nFrom: ${email.sender_email}\nDate: ${new Date(email.created_at).toLocaleString()}\nSubject: ${email.subject}\nTo: ${email.recipient_email}\n\n${email.text_body || ''}`;
-		htmlBody = '<p>' + textBody.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>') + '</p>';
+		const forwardedText = '---------- Forwarded message ----------\nFrom: ' + email.sender_email + '\nDate: ' + new Date(email.created_at).toLocaleString() + '\nSubject: ' + email.subject + '\nTo: ' + email.recipient_email + '\n\n' + (email.text_body || '');
+		textBody = (signatureText() ? signatureText() + '\n\n' : '') + forwardedText;
+		htmlBody = signatureBlock() + '<p>' + plainTextToHtml(forwardedText) + '</p>';
 		fromName = profileName || fromName;
 		inReplyTo = null; references = null; showCompose = true; composeMinimized = false;
 	}
@@ -445,7 +471,9 @@
 		sending = true;
 		try {
 			const form = new FormData();
-			form.set('fromName', fromName); form.set('to', to); form.set('cc', cc); form.set('bcc', bcc); form.set('subject', subject); form.set('text', textBody); form.set('html', htmlMode ? htmlBody : (editorEl?.innerHTML || htmlBody));
+			const outgoingHtml = htmlMode ? htmlBody : (editorEl?.innerHTML || htmlBody);
+			const outgoingText = htmlMode ? textBody : (editorEl?.innerText || textBody);
+			form.set('fromName', fromName); form.set('to', to); form.set('cc', cc); form.set('bcc', bcc); form.set('subject', subject); form.set('text', outgoingText); form.set('html', outgoingHtml);
 			if (inReplyTo) form.set('inReplyTo', inReplyTo); if (references) form.set('references', references);
 			for (const file of attachmentFiles) form.append('attachments', file, file.name);
 			const res = await fetch('/api/emails/send', { method: 'POST', body: form });
@@ -536,7 +564,7 @@
 		try {
 			const profile = JSON.parse(localStorage.getItem('ggacrux_profile') || '{}');
 			profileName = profile.displayName || (userEmail.split('@')[0] || 'GGacrux'); fromName = profileName;
-			profilePhoto = profile.photo || ''; emailSignature = profile.signature || '';
+			profilePhoto = profile.photo || ''; signatureHtml = profile.signatureHtml || profile.signature || '';
 			selectedTheme = profile.theme || localStorage.getItem('ggacrux_theme') || 'slate';
 			document.documentElement.dataset.theme = selectedTheme;
 		} catch { profileName = userEmail.split('@')[0] || 'GGacrux'; }
@@ -808,7 +836,7 @@
 				<div><label class="field-label" for="profile-photo">Profile picture</label><input id="profile-photo" type="file" accept="image/*" on:change={handleProfilePhoto} /><button class="btn-link" type="button" on:click={() => { profilePhoto = ''; saveProfile(); }}>Remove photo</button></div>
 			</div>
 			<div class="form-row"><label for="profile-name">Display name</label><input id="profile-name" bind:value={profileName} on:input={saveProfile} /></div>
-			<div class="form-row"><label for="profile-signature">Email signature</label><textarea id="profile-signature" rows="5" bind:value={emailSignature} on:input={saveProfile} placeholder="Kind regards,&#10;Your name"></textarea></div>
+			<div class="form-row"><label for="profile-signature">Email signature</label><textarea id="profile-signature" rows="5" bind:value={signatureHtml} on:input={saveProfile} placeholder="Kind regards,&#10;Your name"></textarea></div>
 			<div class="form-row"><span class="field-label">Theme</span><div class="theme-options">
 				<button type="button" class:theme-active={selectedTheme === 'slate'} on:click={() => changeTheme('slate')}>Slate Light</button>
 				<button type="button" class:theme-active={selectedTheme === 'midnight'} on:click={() => changeTheme('midnight')}>Midnight Dark</button>
