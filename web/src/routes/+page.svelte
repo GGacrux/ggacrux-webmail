@@ -1,3 +1,23 @@
+<script context="module" lang="ts">
+	let authRedirectInProgress = false;
+
+	async function apiFetch(url: string, init: RequestInit = {}): Promise<Response> {
+		if (authRedirectInProgress) return new Promise<Response>(() => {});
+		const res = await fetch(url, {
+			...init,
+			credentials: 'same-origin',
+			redirect: 'manual'
+		});
+		const accessRedirect = res.url.toLowerCase().includes('cloudflareaccess.com');
+		if (res.type === 'opaqueredirect' || res.status === 401 || res.status === 403 || accessRedirect) {
+			authRedirectInProgress = true;
+			if (typeof window !== 'undefined') window.location.reload();
+			return new Promise<Response>(() => {});
+		}
+		return res;
+	}
+</script>
+
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { buildSandboxedEmailHtml } from '../lib/sanitize';
@@ -164,6 +184,7 @@
 	}
 
 	function notify(msg: string) {
+		if (authRedirectInProgress) return;
 		statusMessage = msg;
 		setTimeout(() => {
 			if (statusMessage === msg) statusMessage = '';
@@ -171,12 +192,13 @@
 	}
 
 	async function loadEmails(silent = false) {
+		if (authRedirectInProgress) return;
 		if (!silent) { loadingList = true; listOffset = 0; }
 		try {
 			const params = new URLSearchParams({ folder, limit: '25', offset: '0' });
 			if (virtualFolder) params.set('virtualFolder', virtualFolder); if (activeTag) params.set('tag', activeTag);
 			if (searchQuery.trim()) params.set('q', searchQuery.trim());
-			const res = await fetch(`/api/emails?${params}`);
+			const res = await apiFetch(`/api/emails?${params}`);
 			if (!res.ok) throw new Error('Failed to load emails');
 			const payload = await res.json();
 			if (silent) {
@@ -193,13 +215,14 @@
 	}
 
 	async function loadMore() {
+		if (authRedirectInProgress) return;
 		if (loadingMore || !hasMore) return;
 		loadingMore = true;
 		try {
 			const params = new URLSearchParams({ folder, limit: '25', offset: String(listOffset) });
 			if (virtualFolder) params.set('virtualFolder', virtualFolder); if (activeTag) params.set('tag', activeTag);
 			if (searchQuery.trim()) params.set('q', searchQuery.trim());
-			const res = await fetch(`/api/emails?${params}`);
+			const res = await apiFetch(`/api/emails?${params}`);
 			if (!res.ok) throw new Error('Failed to load more messages');
 			const payload = await res.json();
 			emails = [...emails, ...payload.emails.filter((item: EmailSummary) => !emails.some((old) => old.id === item.id))];
@@ -230,15 +253,16 @@
 	}
 
 	async function selectEmail(item: EmailSummary) {
+		if (authRedirectInProgress) return;
 		mobileShowDetail = true;
 		loadingDetail = true;
 		try {
-			const res = await fetch(`/api/emails/${item.id}`);
+			const res = await apiFetch(`/api/emails/${item.id}`);
 			if (!res.ok) throw new Error('Failed to load message');
 			const payload = await res.json();
 			selectedEmail = payload.email;
 			attachments = payload.attachments || [];
-			const threadRes = await fetch('/api/emails?threadId=' + encodeURIComponent(item.message_id || item.id));
+			const threadRes = await apiFetch('/api/emails?threadId=' + encodeURIComponent(item.message_id || item.id));
 			if (threadRes.ok) { const threadPayload = await threadRes.json(); threadMessages = threadPayload.emails || []; } else threadMessages = [{ ...payload.email, attachments: payload.attachments || [] }];
 
 			if (selectedEmail?.html_body) {
@@ -249,7 +273,7 @@
 
 			// Mark as read automatically if unread
 			if (item.is_read === 0) {
-				await fetch(`/api/emails/${item.id}`, {
+				await apiFetch(`/api/emails/${item.id}`, {
 					method: 'PATCH',
 					headers: { 'Content-Type': 'application/json' },
 					body: JSON.stringify({ is_read: 1 })
@@ -274,8 +298,8 @@
 		try {
 			const idsToUpdate = [...selectedIds];
 		await Promise.all(idsToUpdate.map((id) => action === 'delete'
-				? fetch(`/api/emails/${id}`, { method: 'DELETE' })
-				: fetch(`/api/emails/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(action === 'trash' ? { folder: 'trash' } : { is_read: action === 'read' ? 1 : 0 }) })));
+				? apiFetch(`/api/emails/${id}`, { method: 'DELETE' })
+				: apiFetch(`/api/emails/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(action === 'trash' ? { folder: 'trash' } : { is_read: action === 'read' ? 1 : 0 }) })));
 			if (selectedEmail && idsToUpdate.includes(selectedEmail.id) && (action === 'trash' || action === 'delete')) selectedEmail = null;
 			selectedIds = [];
 			await loadEmails();
@@ -286,7 +310,7 @@
 
 	async function toggleRead(email: EmailDetail) {
 		const nextState = email.is_read === 1 ? 0 : 1;
-		await fetch(`/api/emails/${email.id}`, {
+		await apiFetch(`/api/emails/${email.id}`, {
 			method: 'PATCH',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({ is_read: nextState })
@@ -303,7 +327,7 @@
 		try {
 			await Promise.all(
 				unreadItems.map((item) =>
-					fetch(`/api/emails/${item.id}`, {
+					apiFetch(`/api/emails/${item.id}`, {
 						method: 'PATCH',
 						headers: { 'Content-Type': 'application/json' },
 						body: JSON.stringify({ is_read: 1 })
@@ -321,7 +345,7 @@
 	}
 
 	async function moveToFolder(id: string, targetFolder: 'inbox' | 'trash') {
-		await fetch(`/api/emails/${id}`, {
+		await apiFetch(`/api/emails/${id}`, {
 			method: 'PATCH',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({ folder: targetFolder })
@@ -336,7 +360,7 @@
 		if (!confirm('Permanently delete this email and any stored attachments? This cannot be undone.')) {
 			return;
 		}
-		const res = await fetch(`/api/emails/${id}`, { method: 'DELETE' });
+		const res = await apiFetch(`/api/emails/${id}`, { method: 'DELETE' });
 		if (res.ok) {
 			selectedEmail = null;
 			attachments = [];
@@ -359,7 +383,7 @@
 
 		bulkWorking = true;
 		try {
-			await Promise.all(emails.map((item) => fetch(`/api/emails/${item.id}`, { method: 'DELETE' })));
+			await Promise.all(emails.map((item) => apiFetch(`/api/emails/${item.id}`, { method: 'DELETE' })));
 			selectedEmail = null;
 			attachments = [];
 			notify('Trash emptied');
@@ -371,12 +395,12 @@
 		}
 	}
 
-	async function loadStorage() { try { const r = await fetch('/api/storage'); if (r.ok) storage = await r.json(); } catch { /* optional metrics */ } }
+	async function loadStorage() { if (authRedirectInProgress) return; try { const r = await apiFetch('/api/storage'); if (r.ok) storage = await r.json(); } catch { /* optional metrics */ } }
 	function storagePercent(bytes: number, limit: number) { return Math.min(100, Math.max(0, bytes / limit * 100)); }
 	function storageTone(bytes: number, limit: number) { const p = storagePercent(bytes, limit); return p > 90 ? 'danger' : p > 75 ? 'warning' : ''; }
 	function selectVirtualView(value: string) { mobileNavOpen = false; mobileShowDetail = false; virtualFolder = value; activeTag = ''; selectedEmail = null; threadMessages = []; selectedIds = []; loadEmails(); }
 	function createLabel() { const name = prompt('Label name'); if (!name?.trim()) return; const color = prompt('Label color (hex)', '#2563eb') || '#2563eb'; labels = [...labels, { name: name.trim(), color: /^#[0-9a-f]{6}$/i.test(color) ? color : '#2563eb' }]; localStorage.setItem('ggacrux_labels', JSON.stringify(labels)); }
-	async function toggleEmailTag(email: EmailSummary, tag: string) { let current: string[] = []; try { current = JSON.parse((email as EmailSummary & { tags?: string }).tags || '[]'); } catch {} const next = current.includes(tag) ? current.filter((v) => v !== tag) : [...current, tag]; const r = await fetch('/api/emails', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids: [email.id], tags: next }) }); if (!r.ok) { notify('Could not update labels'); return; } (email as EmailSummary & { tags?: string }).tags = JSON.stringify(next); emails = [...emails]; if (selectedEmail?.id === email.id) selectedEmail = { ...selectedEmail, tags: JSON.stringify(next) }; }
+	async function toggleEmailTag(email: EmailSummary, tag: string) { let current: string[] = []; try { current = JSON.parse((email as EmailSummary & { tags?: string }).tags || '[]'); } catch {} const next = current.includes(tag) ? current.filter((v) => v !== tag) : [...current, tag]; const r = await apiFetch('/api/emails', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids: [email.id], tags: next }) }); if (!r.ok) { notify('Could not update labels'); return; } (email as EmailSummary & { tags?: string }).tags = JSON.stringify(next); emails = [...emails]; if (selectedEmail?.id === email.id) selectedEmail = { ...selectedEmail, tags: JSON.stringify(next) }; }
 	function handleFiles(event: Event) { const input = event.currentTarget as HTMLInputElement; const next = [...attachmentFiles, ...Array.from(input.files || [])]; if (next.reduce((n, f) => n + f.size, 0) > attachmentLimit) { attachmentError = 'Attachments must total 10 MB or less.'; input.value = ''; return; } attachmentFiles = next; attachmentError = ''; input.value = ''; }
 	function removeFile(index: number) { attachmentFiles = attachmentFiles.filter((_, i) => i !== index); attachmentError = ''; }
 	function runEditorCommand(target: HTMLDivElement | undefined, command: string, value?: string) {
@@ -482,7 +506,7 @@
 			form.set('fromName', fromName); form.set('to', to); form.set('cc', cc); form.set('bcc', bcc); form.set('subject', subject); form.set('text', outgoingText); form.set('html', outgoingHtml);
 			if (inReplyTo) form.set('inReplyTo', inReplyTo); if (references) form.set('references', references);
 			for (const file of attachmentFiles) form.append('attachments', file, file.name);
-			const res = await fetch('/api/emails/send', { method: 'POST', body: form });
+			const res = await apiFetch('/api/emails/send', { method: 'POST', body: form });
 			const payload = await res.json();
 			if (!res.ok) throw new Error(payload.message || 'Failed to send email');
 
@@ -603,14 +627,34 @@
 		observer = new IntersectionObserver((entries) => { if (entries.some((entry) => entry.isIntersecting)) loadMore(); }, { root: null, rootMargin: '240px' });
 		loadEmails().then(() => { if (sentinelEl) observer?.observe(sentinelEl); });
 
-		// Auto-refresh inbox/folder every 30s when tab is active
+		// Auto-refresh inbox/folder every 30s and when the tab regains focus.
+		const refreshOnReturn = () => {
+			if (authRedirectInProgress || document.hidden || showCompose) return;
+			void loadEmails(true);
+			void loadStorage();
+		};
+		const handleVisibilityChange = () => {
+			if (authRedirectInProgress || document.hidden) return;
+			refreshOnReturn();
+		};
+		const handleWindowFocus = () => {
+			if (authRedirectInProgress) return;
+			refreshOnReturn();
+		};
+		document.addEventListener('visibilitychange', handleVisibilityChange);
+		window.addEventListener('focus', handleWindowFocus);
 		const pollInterval = setInterval(() => {
-			if (!document.hidden && !showCompose) {
-				loadEmails(true); loadStorage();
-			}
+			if (authRedirectInProgress) return;
+			if (!document.hidden && !showCompose) refreshOnReturn();
 		}, 30000);
 
-		return () => { clearInterval(pollInterval); clearInterval(draftTimer); observer?.disconnect(); };
+		return () => {
+			clearInterval(pollInterval);
+			clearInterval(draftTimer);
+			document.removeEventListener('visibilitychange', handleVisibilityChange);
+			window.removeEventListener('focus', handleWindowFocus);
+			observer?.disconnect();
+		};
 	});
 </script>
 
