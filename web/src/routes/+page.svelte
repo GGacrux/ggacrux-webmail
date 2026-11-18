@@ -66,6 +66,13 @@
 	let bcc = '';
 	let draftKey = 'ggacrux-mail-draft-v1';
 	let restoredDraft = false;
+	let quickLinks: { id: string; title: string; url: string }[] = [];
+	let showProfile = false;
+	let profileName = 'GGacrux';
+	let profilePhoto = '';
+	let emailSignature = '';
+	let selectedTheme: 'slate' | 'midnight' | 'nordic' = 'slate';
+	$: avatarInitial = (profileName || userEmail || 'G').trim().charAt(0).toUpperCase();
 	let subject = '';
 	let textBody = '';
 	let inReplyTo: string | null = null;
@@ -78,6 +85,76 @@
 
 	$: userEmail = data?.userEmail || '';
 	$: visibleEmails = unreadOnly ? emails.filter((e) => e.is_read === 0) : emails;
+
+	function saveProfile() {
+
+		fromName = profileName.trim() || (userEmail.split('@')[0] || 'GGacrux');
+
+		localStorage.setItem('ggacrux_profile', JSON.stringify({ displayName: fromName, photo: profilePhoto, signature: emailSignature, theme: selectedTheme }));
+
+	}
+
+	function changeTheme(theme: 'slate' | 'midnight' | 'nordic') {
+
+		selectedTheme = theme; document.documentElement.dataset.theme = theme;
+
+		localStorage.setItem('ggacrux_theme', theme);
+
+		localStorage.setItem('ggacrux_profile', JSON.stringify({ displayName: profileName, photo: profilePhoto, signature: emailSignature, theme }));
+
+	}
+
+	function addQuickLink() {
+
+		const title = prompt('Bookmark title'); if (!title?.trim()) return;
+
+		let url = prompt('Bookmark URL'); if (!url?.trim()) return;
+
+		url = url.trim(); if (!/^https?:\/\//i.test(url)) url = 'https://' + url;
+
+		try { const parsed = new URL(url); if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error(); }
+
+		catch { notify('Please enter a valid web address'); return; }
+
+		quickLinks = [...quickLinks, { id: crypto.randomUUID(), title: title.trim(), url }];
+
+		localStorage.setItem('ggacrux_quick_links', JSON.stringify(quickLinks));
+
+	}
+
+	function removeQuickLink(id: string) {
+
+		quickLinks = quickLinks.filter((link) => link.id !== id);
+
+		localStorage.setItem('ggacrux_quick_links', JSON.stringify(quickLinks));
+
+	}
+
+	async function handleProfilePhoto(event: Event) {
+
+		const file = (event.currentTarget as HTMLInputElement).files?.[0]; if (!file) return;
+
+		if (!file.type.startsWith('image/')) { notify('Choose an image file'); return; }
+
+		try {
+
+			const bitmap = await createImageBitmap(file); const canvas = document.createElement('canvas');
+
+			canvas.width = 128; canvas.height = 128; const ctx = canvas.getContext('2d');
+
+			if (!ctx) throw new Error('Canvas is unavailable');
+
+			const side = Math.min(bitmap.width, bitmap.height);
+
+			ctx.drawImage(bitmap, (bitmap.width-side)/2, (bitmap.height-side)/2, side, side, 0, 0, 128, 128);
+
+			profilePhoto = canvas.toDataURL('image/webp', 0.82);
+
+			localStorage.setItem('ggacrux_profile', JSON.stringify({ displayName: profileName, photo: profilePhoto, signature: emailSignature, theme: selectedTheme }));
+
+		} catch { notify('Could not process that image'); }
+
+	}
 
 	function notify(msg: string) {
 		statusMessage = msg;
@@ -280,11 +357,9 @@
 
 	function openCompose() {
 		composeError = '';
-		if (userEmail) {
-			fromAlias = userEmail;
-			if (!fromName || fromName === 'GGacrux') fromName = userEmail.split('@')[0].replace(/[._-]+/g, ' ');
-		}
-		if (!restoredDraft) { to = ''; cc = ''; bcc = ''; subject = ''; textBody = ''; }
+		if (userEmail) fromAlias = userEmail;
+		fromName = profileName || (userEmail.split('@')[0] || 'GGacrux');
+		if (!restoredDraft) { to = ''; cc = ''; bcc = ''; subject = ''; textBody = emailSignature ? '\n\n' + emailSignature : ''; }
 		composeMinimized = false;
 		composeExpanded = false;
 		showCcBcc = false;
@@ -315,7 +390,8 @@
 			.split('\n')
 			.map((line) => `> ${line}`)
 			.join('\n');
-		textBody = `\n\n--- On ${quotedDate}, ${email.sender_email} wrote: ---\n${quotedText}`;
+		textBody = (emailSignature ? emailSignature + '\n\n' : '') + `\n\n--- On ${quotedDate}, ${email.sender_email} wrote: ---\n${quotedText}`;
+		fromName = profileName || fromName;
 		showCompose = true;
 	}
 
@@ -333,7 +409,8 @@
 		fromAlias = userEmail;
 		to = ''; cc = ''; bcc = '';
 		subject = email.subject.toLowerCase().startsWith('fwd:') ? email.subject : `Fwd: ${email.subject}`;
-		textBody = `\n\n---------- Forwarded message ----------\nFrom: ${email.sender_email}\nDate: ${new Date(email.created_at).toLocaleString()}\nSubject: ${email.subject}\nTo: ${email.recipient_email}\n\n${email.text_body || ''}`;
+		textBody = (emailSignature ? emailSignature + '\n\n' : '') + `\n\n---------- Forwarded message ----------\nFrom: ${email.sender_email}\nDate: ${new Date(email.created_at).toLocaleString()}\nSubject: ${email.subject}\nTo: ${email.recipient_email}\n\n${email.text_body || ''}`;
+		fromName = profileName || fromName;
 		inReplyTo = null; references = null; showCompose = true; composeMinimized = false;
 	}
 
@@ -443,6 +520,14 @@
 			fromAlias = data.userEmail;
 		}
 		if (userEmail) fromAlias = userEmail;
+		try {
+			const profile = JSON.parse(localStorage.getItem('ggacrux_profile') || '{}');
+			profileName = profile.displayName || (userEmail.split('@')[0] || 'GGacrux'); fromName = profileName;
+			profilePhoto = profile.photo || ''; emailSignature = profile.signature || '';
+			selectedTheme = profile.theme || localStorage.getItem('ggacrux_theme') || 'slate';
+			document.documentElement.dataset.theme = selectedTheme;
+		} catch { profileName = userEmail.split('@')[0] || 'GGacrux'; }
+		try { quickLinks = JSON.parse(localStorage.getItem('ggacrux_quick_links') || '[]'); } catch { quickLinks = []; }
 		const saved = localStorage.getItem(draftKey);
 		if (saved) { try { const draft = JSON.parse(saved); to = draft.to || ''; cc = draft.cc || ''; bcc = draft.bcc || ''; subject = draft.subject || ''; textBody = draft.textBody || ''; fromAlias = draft.fromAlias || userEmail; fromName = draft.fromName || fromName; restoredDraft = true; } catch { localStorage.removeItem(draftKey); } }
 		const draftTimer = setInterval(() => { if (showCompose) localStorage.setItem(draftKey, JSON.stringify({ to, cc, bcc, subject, textBody, fromAlias, fromName })); }, 800);
@@ -493,8 +578,17 @@
 			</button>
 		</nav>
 
+		<div class="quick-links">
+			<div class="quick-links-heading"><strong>Quick Links</strong><button class="quick-add" type="button" aria-label="Add quick link" title="Add bookmark" on:click={addQuickLink}>+</button></div>
+			{#each quickLinks as link (link.id)}
+				<div class="quick-link-item"><a href={link.url} target="_blank" rel="noopener noreferrer" title={link.url}>{link.title}</a><button type="button" class="quick-remove" aria-label="Remove {link.title}" title="Remove bookmark" on:click={() => removeQuickLink(link.id)}>×</button></div>
+			{/each}
+		</div>
 		<div class="sidebar-footer">
-			<span class="user-email" title={userEmail}>{userEmail}</span>
+			<button type="button" class="profile-trigger" on:click={() => (showProfile = true)} title="Profile & Appearance">
+				{#if profilePhoto}<img class="profile-avatar" src={profilePhoto} alt="Profile photo" />{:else}<span class="profile-avatar profile-initial">{avatarInitial}</span>{/if}
+				<span class="profile-label"><strong>{profileName || 'Profile'}</strong><small class="user-email" title={userEmail}>{userEmail}</small></span>
+			</button>
 			<a href="/cdn-cgi/access/logout" class="btn-logout">Log out</a>
 		</div>
 	</aside>
@@ -563,6 +657,7 @@
 							class:selected={selectedEmail?.id === item.id}
 							on:click={() => selectEmail(item)}
 						>
+							<div class="message-row-content">
 							<div class="row-top">
 								<span class="party">
 									{folder === 'sent'
@@ -573,6 +668,7 @@
 							</div>
 							<div class="subject">{item.subject || '(No Subject)'}</div>
 							<div class="snippet">{item.snippet || ''}</div>
+							</div>
 						</button>
 					</li>
 				{/each}
@@ -723,6 +819,26 @@
 			</form>
 			{/if}
 		</div>
+	</div>
+{/if}
+
+{#if showProfile}
+	<div class="modal-backdrop settings-backdrop" role="presentation">
+		<section class="modal settings-modal" role="dialog" aria-modal="true" aria-labelledby="profile-title">
+			<div class="modal-header"><h3 id="profile-title">Profile &amp; Appearance</h3><button class="btn-icon" type="button" on:click={() => { saveProfile(); showProfile = false; }}>✕</button></div>
+			<div class="profile-editor">
+				{#if profilePhoto}<img class="profile-preview" src={profilePhoto} alt="Profile preview" />{:else}<span class="profile-preview profile-initial">{avatarInitial}</span>{/if}
+				<div><label class="field-label" for="profile-photo">Profile picture</label><input id="profile-photo" type="file" accept="image/*" on:change={handleProfilePhoto} /><button class="btn-link" type="button" on:click={() => { profilePhoto = ''; saveProfile(); }}>Remove photo</button></div>
+			</div>
+			<div class="form-row"><label for="profile-name">Display name</label><input id="profile-name" bind:value={profileName} on:input={saveProfile} /></div>
+			<div class="form-row"><label for="profile-signature">Email signature</label><textarea id="profile-signature" rows="5" bind:value={emailSignature} on:input={saveProfile} placeholder="Kind regards,&#10;Your name"></textarea></div>
+			<div class="form-row"><span class="field-label">Theme</span><div class="theme-options">
+				<button type="button" class:theme-active={selectedTheme === 'slate'} on:click={() => changeTheme('slate')}>Slate Light</button>
+				<button type="button" class:theme-active={selectedTheme === 'midnight'} on:click={() => changeTheme('midnight')}>Midnight Dark</button>
+				<button type="button" class:theme-active={selectedTheme === 'nordic'} on:click={() => changeTheme('nordic')}>Nordic Blue</button>
+			</div></div>
+			<div class="modal-footer"><button class="btn-primary" type="button" on:click={() => { saveProfile(); showProfile = false; }}>Save changes</button></div>
+		</section>
 	</div>
 {/if}
 
@@ -1222,4 +1338,73 @@
 			display: inline-block;
 		}
 	}
+
+	:global(:root), :global(:root[data-theme='slate']) {
+		--bg-app: #f8fafc; --bg-surface: #ffffff; --bg-sidebar: #0f172a;
+		--text-primary: #0f172a; --text-secondary: #64748b; --border-color: #e2e8f0; --accent-color: #2563eb;
+	}
+	:global(:root[data-theme='midnight']) {
+		color-scheme: dark; --bg-app:#0b1220; --bg-surface:#111c2e; --bg-sidebar:#080e19;
+		--text-primary:#e5edf8; --text-secondary:#a7b6ca; --border-color:#29384d; --accent-color:#60a5fa;
+	}
+	:global(:root[data-theme='nordic']) {
+		color-scheme: light; --bg-app:#eaf0f6; --bg-surface:#f5f8fc; --bg-sidebar:#26384c;
+		--text-primary:#26384c; --text-secondary:#60758d; --border-color:#cbd8e5; --accent-color:#477da8;
+	}
+	:global(body) { color:var(--text-primary); background:var(--bg-app); }
+	.sidebar { background:var(--bg-sidebar); }
+	.message-list-pane, .reading-pane { background:var(--bg-surface); color:var(--text-primary); border-color:var(--border-color); }
+	.message-row { background:var(--bg-surface); color:var(--text-primary); border-color:var(--border-color); }
+	.message-row:hover { background:var(--bg-app); }
+	.message-row.unread .party, .message-row.unread .subject, .subject { color:var(--text-primary); }
+	.party, .date, .snippet, .meta-grid { color:var(--text-secondary); }
+	.list-header, .list-subbar, .reading-toolbar, .email-header { border-color:var(--border-color); background:var(--bg-surface); }
+	.btn-primary, .nav-folders button.active { background:var(--accent-color); }
+	.message-list-item { display:flex; align-items:stretch; min-width:0; overflow:hidden; border-bottom:1px solid var(--border-color); }
+	.select-message { flex:0 0 30px; min-width:30px; display:flex; align-items:flex-start; padding:18px 0 0 10px; }
+	.message-list-item .message-row { flex:1; min-width:0; overflow:hidden; padding-right:18px; }
+	.message-row-content { flex:1; min-width:0; overflow:hidden; padding-right:4px; }
+	.row-top { display:flex; justify-content:space-between; gap:8px; align-items:center; min-width:0; font-size:13px; }
+	.party { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:none; }
+	.date { flex-shrink:0; white-space:nowrap; font-size:12px; color:var(--text-secondary); }
+	.subject, .snippet { display:block; min-width:0; max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+	.quick-links { display:flex; flex-direction:column; gap:4px; padding:4px 2px 12px; border-bottom:1px solid #334155; }
+	.quick-links-heading, .quick-link-item { display:flex; align-items:center; justify-content:space-between; gap:8px; min-width:0; }
+	.quick-links-heading { color:#e2e8f0; font-size:12px; padding:0 8px 4px; }
+	.quick-add, .quick-remove { border:0; background:transparent; color:#cbd5e1; cursor:pointer; border-radius:4px; font-size:17px; line-height:1; padding:3px 6px; }
+	.quick-add:hover, .quick-remove:hover { background:#334155; color:#fff; }
+	.quick-link-item a { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:#cbd5e1; text-decoration:none; font-size:13px; padding:5px 8px; flex:1; }
+	.quick-link-item a:hover { color:#fff; text-decoration:underline; }
+	.quick-remove { opacity:0; flex-shrink:0; }
+	.quick-link-item:hover .quick-remove, .quick-remove:focus-visible { opacity:1; }
+	.sidebar-footer { align-items:center; }
+	.profile-trigger { display:flex; align-items:center; gap:9px; min-width:0; flex:1; text-align:left; border:0; padding:4px; border-radius:7px; background:transparent; color:#e2e8f0; cursor:pointer; }
+	.profile-trigger:hover { background:#1e293b; }
+	.profile-avatar { width:34px; height:34px; flex:0 0 34px; border-radius:50%; object-fit:cover; }
+	.profile-initial { display:inline-flex; align-items:center; justify-content:center; background:#38bdf8; color:#0f172a; font-weight:700; }
+	.profile-label { display:flex; flex-direction:column; min-width:0; gap:2px; }
+	.profile-label strong, .profile-label small { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:135px; }
+	.profile-label strong { color:#f8fafc; font-size:12px; }
+	.profile-label small { color:#94a3b8; font-size:10px; }
+	.settings-modal { max-height:calc(100vh - 32px); overflow-y:auto; }
+	.profile-editor { display:flex; align-items:center; gap:16px; margin:8px 0 18px; }
+	.profile-preview { width:76px; height:76px; flex:0 0 76px; border-radius:50%; object-fit:cover; font-size:28px; }
+	.field-label { display:block; font-size:12px; font-weight:600; color:var(--text-secondary); margin-bottom:6px; }
+	.theme-options { display:flex; flex-wrap:wrap; gap:8px; }
+	.theme-options button { padding:8px 11px; border:1px solid var(--border-color); border-radius:7px; background:var(--bg-surface); color:var(--text-primary); cursor:pointer; }
+	.theme-options button.theme-active { border:2px solid var(--accent-color); background:var(--bg-app); font-weight:700; }
+	.settings-modal { background:var(--bg-surface); color:var(--text-primary); }
+	.settings-modal .form-row input, .settings-modal .form-row textarea { background:var(--bg-surface); color:var(--text-primary); border-color:var(--border-color); }
+	.settings-modal .modal-header { border-color:var(--border-color); }
+	.settings-modal .form-row label { color:var(--text-secondary); }
+	:global(:root[data-theme='midnight']) .list-subbar { color:var(--text-secondary); }
+	:global(:root[data-theme='midnight']) .btn-secondary, :global(:root[data-theme='midnight']) .btn-icon { background:#1d2b40; color:#e5edf8; border-color:#34465e; }
+	:global(:root[data-theme='midnight']) .attachment-chip { background:#1d2b40; color:#e5edf8; border-color:#34465e; }
+	@media (max-width:900px) {
+		.quick-links { display:none; }
+		.profile-label { display:none; }
+		.profile-trigger { flex:0 0 auto; }
+		.profile-avatar { width:30px; height:30px; flex-basis:30px; }
+	}
+
 </style>
