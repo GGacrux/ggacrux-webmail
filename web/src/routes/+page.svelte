@@ -177,8 +177,11 @@
 	async function apiFetch(input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> {
 		if (authRedirectInProgress) return new Promise<Response>(() => {});
 		try {
+			const headers = new Headers(init.headers);
+			if (!headers.has('X-Requested-With')) headers.set('X-Requested-With', 'XMLHttpRequest');
 			const response = await fetch(input, {
 				...init,
+				headers,
 				credentials: 'same-origin',
 				redirect: 'manual'
 			});
