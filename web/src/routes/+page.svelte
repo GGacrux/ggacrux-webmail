@@ -54,7 +54,6 @@
 	let pollingEmails = false;
 	const emailFrameObservers = new WeakMap<HTMLIFrameElement, ResizeObserver>();
 	let authRedirectInProgress = false;
-	let sanitizedSrcDoc = '';
 	let threadMessages: (EmailDetail & { attachments?: Attachment[] })[] = [];
 	let virtualFolder = ''; let activeTag = ''; let labels: Label[] = []; let storage: StorageUsage | null = null;
 	let htmlBody = ''; let htmlMode = false; let editorEl: HTMLDivElement;
@@ -298,12 +297,6 @@
 				threadMessages = [{ ...payload.email, attachments: payload.attachments || [] }];
 			}
 
-			if (selectedEmail?.html_body) {
-				sanitizedSrcDoc = buildSandboxedEmailHtml(selectedEmail.html_body);
-			} else {
-				sanitizedSrcDoc = '';
-			}
-
 			if (item.is_read === 0) {
 				const readResponse = await apiFetch(`/api/emails/${item.id}`, {
 					method: 'PATCH',
@@ -442,6 +435,23 @@
 		virtualFolder = value;
 		activeTag = '';
 		selectedEmail = null;
+		attachments = [];
+		threadMessages = [];
+		selectedIds = [];
+		loadEmails();
+	}
+
+	function selectTag(value: string) {
+		emailListRequestId += 1;
+		loadingMore = false;
+		emailSelectionRequestId += 1;
+		loadingDetail = false;
+		mobileNavOpen = false;
+		mobileShowDetail = false;
+		activeTag = activeTag === value ? '' : value;
+		virtualFolder = '';
+		selectedEmail = null;
+		attachments = [];
 		threadMessages = [];
 		selectedIds = [];
 		loadEmails();
@@ -765,7 +775,7 @@
 		</nav>
 
 		<div class="smart-views"><strong>Smart Views</strong><button class:active={virtualFolder === "all"} on:click={() => selectVirtualView("all")}>All Mail</button><button class:active={virtualFolder === "attachments"} on:click={() => selectVirtualView("attachments")}>Has Attachments</button>{#each [...new Set(emails.map((mail) => mail.recipient_email).filter(Boolean))] as alias (alias)}<button class:active={virtualFolder === "alias:" + alias} on:click={() => selectVirtualView("alias:" + alias)}>↳ {alias}</button>{/each}</div>
-		<div class="label-nav"><div class="quick-links-heading"><strong>Labels</strong><button class="quick-add" type="button" on:click={createLabel}>+</button></div>{#each labels as label (label.name)}<button class:active={activeTag === label.name} on:click={() => { mobileNavOpen = false; mobileShowDetail = false; activeTag = activeTag === label.name ? "" : label.name; virtualFolder = ""; loadEmails(); }}><span class="label-dot" style={"background:" + label.color}></span>{label.name}</button>{/each}</div>
+		<div class="label-nav"><div class="quick-links-heading"><strong>Labels</strong><button class="quick-add" type="button" on:click={createLabel}>+</button></div>{#each labels as label (label.name)}<button class:active={activeTag === label.name} on:click={() => selectTag(label.name)}><span class="label-dot" style={"background:" + label.color}></span>{label.name}</button>{/each}</div>
 		<div class="quick-links">
 			<div class="quick-links-heading"><strong>Quick Links</strong><button class="quick-add" type="button" aria-label="Add quick link" title="Add bookmark" on:click={addQuickLink}>+</button></div>
 			{#each quickLinks as link (link.id)}
