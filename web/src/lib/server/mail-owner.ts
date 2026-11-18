@@ -16,9 +16,10 @@ export async function ensureMailOwnerColumn(db: D1Database): Promise<void> {
 	}
 	await db.prepare(`
 		UPDATE emails
-		SET owner_email = lower(trim(CASE WHEN folder = 'sent' THEN sender_email ELSE recipient_email END))
+		SET owner_email = lower(trim(CASE WHEN lower(sender_email) LIKE '%@ggacrux.ca' THEN sender_email ELSE recipient_email END))
 		WHERE owner_email IS NULL OR trim(owner_email) = ''
 	`).run();
+	await db.prepare('CREATE INDEX IF NOT EXISTS idx_emails_owner_folder_created ON emails(owner_email, folder, created_at DESC)').run();
 }
 
 export function requireMailOwner(userEmail: string | undefined): string {
