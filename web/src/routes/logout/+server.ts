@@ -1,8 +1,14 @@
 import type { RequestHandler } from './$types';
+import { env } from 'cloudflare:workers';
 
-export const GET: RequestHandler = async ({ url }) => {
-	const cfAccessLogout = `${url.origin}/cdn-cgi/access/logout`;
-	const msLogout = `https://login.microsoftonline.com/common/oauth2/v2.0/logout?post_logout_redirect_uri=${encodeURIComponent(cfAccessLogout)}`;
+export const GET: RequestHandler = async () => {
+	const config = env as unknown as { ACCESS_TEAM_DOMAIN?: string };
+	const teamDomain = (config.ACCESS_TEAM_DOMAIN || 'inbox-ggacrux-team.cloudflareaccess.com')
+		.trim()
+		.replace(/^https?:\/\//i, '')
+		.replace(/\/+$/, '');
+	const msLogout = 'https://login.microsoftonline.com/common/oauth2/v2.0/logout';
+	const cfTeamLogout = `https://${teamDomain}/cdn-cgi/access/logout?returnTo=${encodeURIComponent(msLogout)}`;
 	const body = `<!doctype html>
 <html lang="en">
 <head><meta charset="utf-8"><title>Signing out</title></head>
@@ -10,7 +16,7 @@ export const GET: RequestHandler = async ({ url }) => {
 <script>
 	try { localStorage.clear(); } catch {}
 	try { sessionStorage.clear(); } catch {}
-	window.location.replace(${JSON.stringify(msLogout)});
+	window.location.replace(${JSON.stringify(cfTeamLogout)});
 </script>
 </body>
 </html>`;
