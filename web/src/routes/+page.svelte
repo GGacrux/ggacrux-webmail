@@ -19,10 +19,9 @@
 		created_at: string;
 	}
 
-	interface EmailDetail extends EmailSummary {
-		text_body: string;
-		html_body: string | null;
-	}
+	interface EmailDetail extends EmailSummary { text_body: string; html_body: string | null; tags?: string }
+	interface StorageUsage { d1: { usedBytes: number; limitBytes: number; emailCount: number }; r2: { usedBytes: number; limitBytes: number; fileCount: number } }
+	interface Label { name: string; color: string }
 
 	interface Attachment {
 		id: string;
@@ -51,6 +50,11 @@
 	let attachments: Attachment[] = [];
 	let loadingDetail = false;
 	let sanitizedSrcDoc = '';
+	let threadMessages: (EmailDetail & { attachments?: Attachment[] })[] = [];
+	let virtualFolder = ''; let activeTag = ''; let labels: Label[] = []; let storage: StorageUsage | null = null;
+	let htmlBody = ''; let htmlMode = false; let editorEl: HTMLDivElement;
+	let attachmentFiles: File[] = []; let attachmentError = '';
+	const attachmentLimit = 10 * 1024 * 1024;
 
 	// Compose / Reply Modal State
 	let showCompose = false;
@@ -167,6 +171,7 @@
 		if (!silent) { loadingList = true; listOffset = 0; }
 		try {
 			const params = new URLSearchParams({ folder, limit: '25', offset: '0' });
+			if (virtualFolder) params.set('virtualFolder', virtualFolder); if (activeTag) params.set('tag', activeTag);
 			if (searchQuery.trim()) params.set('q', searchQuery.trim());
 			const res = await fetch(`/api/emails?${params}`);
 			if (!res.ok) throw new Error('Failed to load emails');
@@ -188,6 +193,7 @@
 		loadingMore = true;
 		try {
 			const params = new URLSearchParams({ folder, limit: '25', offset: String(listOffset) });
+			if (virtualFolder) params.set('virtualFolder', virtualFolder); if (activeTag) params.set('tag', activeTag);
 			if (searchQuery.trim()) params.set('q', searchQuery.trim());
 			const res = await fetch(`/api/emails?${params}`);
 			if (!res.ok) throw new Error('Failed to load more messages');
@@ -224,6 +230,8 @@
 			const payload = await res.json();
 			selectedEmail = payload.email;
 			attachments = payload.attachments || [];
+			const threadRes = await fetch('/api/emails?threadId=' + encodeURIComponent(item.message_id || item.id));
+			if (threadRes.ok) { const threadPayload = await threadRes.json(); threadMessages = threadPayload.emails || []; } else threadMessages = [{ ...payload.email, attachments: payload.attachments || [] }];
 
 			if (selectedEmail?.html_body) {
 				sanitizedSrcDoc = buildSandboxedEmailHtml(selectedEmail.html_body);
@@ -355,11 +363,21 @@
 		}
 	}
 
+	async function loadStorage() { try { const r = await fetch('/api/storage'); if (r.ok) storage = await r.json(); } catch { /* optional metrics */ } }
+	function storagePercent(bytes: number, limit: number) { return Math.min(100, Math.max(0, bytes / limit * 100)); }
+	function storageTone(bytes: number, limit: number) { const p = storagePercent(bytes, limit); return p > 90 ? 'danger' : p > 75 ? 'warning' : ''; }
+	function selectVirtualView(value: string) { virtualFolder = value; activeTag = ''; selectedEmail = null; threadMessages = []; selectedIds = []; loadEmails(); }
+	function createLabel() { const name = prompt('Label name'); if (!name?.trim()) return; const color = prompt('Label color (hex)', '#2563eb') || '#2563eb'; labels = [...labels, { name: name.trim(), color: /^#[0-9a-f]{6}$/i.test(color) ? color : '#2563eb' }]; localStorage.setItem('ggacrux_labels', JSON.stringify(labels)); }
+	async function toggleEmailTag(email: EmailSummary, tag: string) { let current: string[] = []; try { current = JSON.parse((email as EmailSummary & { tags?: string }).tags || '[]'); } catch {} const next = current.includes(tag) ? current.filter((v) => v !== tag) : [...current, tag]; const r = await fetch('/api/emails', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids: [email.id], tags: next }) }); if (!r.ok) { notify('Could not update labels'); return; } (email as EmailSummary & { tags?: string }).tags = JSON.stringify(next); emails = [...emails]; if (selectedEmail?.id === email.id) selectedEmail = { ...selectedEmail, tags: JSON.stringify(next) }; }
+	function handleFiles(event: Event) { const input = event.currentTarget as HTMLInputElement; const next = [...attachmentFiles, ...Array.from(input.files || [])]; if (next.reduce((n, f) => n + f.size, 0) > attachmentLimit) { attachmentError = 'Attachments must total 10 MB or less.'; input.value = ''; return; } attachmentFiles = next; attachmentError = ''; input.value = ''; }
+	function removeFile(index: number) { attachmentFiles = attachmentFiles.filter((_, i) => i !== index); attachmentError = ''; }
+	function formatCommand(command: string) { editorEl?.focus(); if (command === 'createLink') { const url = prompt('Link URL'); if (!url) return; document.execCommand(command, false, url); } else document.execCommand(command); if (editorEl) { htmlBody = editorEl.innerHTML; textBody = editorEl.innerText; } }
+	function updateVisualBody() { if (editorEl) { htmlBody = editorEl.innerHTML; textBody = editorEl.innerText; } }
 	function openCompose() {
 		composeError = '';
 		if (userEmail) fromAlias = userEmail;
 		fromName = profileName || (userEmail.split('@')[0] || 'GGacrux');
-		if (!restoredDraft) { to = ''; cc = ''; bcc = ''; subject = ''; textBody = emailSignature ? '\n\n' + emailSignature : ''; }
+		if (!restoredDraft) { to = ''; cc = ''; bcc = ''; subject = ''; textBody = emailSignature ? '\n\n' + emailSignature : ''; htmlBody = emailSignature ? '<p>' + emailSignature + '</p>' : ''; }
 		composeMinimized = false;
 		composeExpanded = false;
 		showCcBcc = false;
@@ -391,6 +409,7 @@
 			.map((line) => `> ${line}`)
 			.join('\n');
 		textBody = (emailSignature ? emailSignature + '\n\n' : '') + `\n\n--- On ${quotedDate}, ${email.sender_email} wrote: ---\n${quotedText}`;
+		htmlBody = '<p>' + textBody.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>') + '</p>';
 		fromName = profileName || fromName;
 		showCompose = true;
 	}
@@ -410,6 +429,7 @@
 		to = ''; cc = ''; bcc = '';
 		subject = email.subject.toLowerCase().startsWith('fwd:') ? email.subject : `Fwd: ${email.subject}`;
 		textBody = (emailSignature ? emailSignature + '\n\n' : '') + `\n\n---------- Forwarded message ----------\nFrom: ${email.sender_email}\nDate: ${new Date(email.created_at).toLocaleString()}\nSubject: ${email.subject}\nTo: ${email.recipient_email}\n\n${email.text_body || ''}`;
+		htmlBody = '<p>' + textBody.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>') + '</p>';
 		fromName = profileName || fromName;
 		inReplyTo = null; references = null; showCompose = true; composeMinimized = false;
 	}
@@ -422,29 +442,19 @@
 		}
 		sending = true;
 		try {
-			const res = await fetch('/api/emails/send', {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({
-					fromAlias,
-					fromName,
-					to,
-					subject,
-					text: textBody,
-					cc,
-					bcc,
-					inReplyTo,
-					references
-				})
-			});
+			const form = new FormData();
+			form.set('fromName', fromName); form.set('to', to); form.set('cc', cc); form.set('bcc', bcc); form.set('subject', subject); form.set('text', textBody); form.set('html', htmlMode ? htmlBody : (editorEl?.innerHTML || htmlBody));
+			if (inReplyTo) form.set('inReplyTo', inReplyTo); if (references) form.set('references', references);
+			for (const file of attachmentFiles) form.append('attachments', file, file.name);
+			const res = await fetch('/api/emails/send', { method: 'POST', body: form });
 			const payload = await res.json();
 			if (!res.ok) throw new Error(payload.message || 'Failed to send email');
 
 			showCompose = false;
 			localStorage.removeItem(draftKey);
 			restoredDraft = false;
-			to = ''; cc = ''; bcc = ''; subject = ''; textBody = '';
-			notify('Email sent');
+			to = ''; cc = ''; bcc = ''; subject = ''; textBody = ''; htmlBody = ''; attachmentFiles = []; attachmentError = '';
+			notify('Email sent'); await loadStorage();
 			if (folder === 'sent') await loadEmails();
 		} catch (err) {
 			composeError = (err as Error).message;
@@ -528,16 +538,18 @@
 			document.documentElement.dataset.theme = selectedTheme;
 		} catch { profileName = userEmail.split('@')[0] || 'GGacrux'; }
 		try { quickLinks = JSON.parse(localStorage.getItem('ggacrux_quick_links') || '[]'); } catch { quickLinks = []; }
+		try { labels = JSON.parse(localStorage.getItem('ggacrux_labels') || '[]'); } catch { labels = []; }
+		void loadStorage();
 		const saved = localStorage.getItem(draftKey);
-		if (saved) { try { const draft = JSON.parse(saved); to = draft.to || ''; cc = draft.cc || ''; bcc = draft.bcc || ''; subject = draft.subject || ''; textBody = draft.textBody || ''; fromAlias = draft.fromAlias || userEmail; fromName = draft.fromName || fromName; restoredDraft = true; } catch { localStorage.removeItem(draftKey); } }
-		const draftTimer = setInterval(() => { if (showCompose) localStorage.setItem(draftKey, JSON.stringify({ to, cc, bcc, subject, textBody, fromAlias, fromName })); }, 800);
+		if (saved) { try { const draft = JSON.parse(saved); to = draft.to || ''; cc = draft.cc || ''; bcc = draft.bcc || ''; subject = draft.subject || ''; textBody = draft.textBody || ''; htmlBody = draft.htmlBody || ''; fromAlias = userEmail; fromName = draft.fromName || fromName; restoredDraft = true; } catch { localStorage.removeItem(draftKey); } }
+		const draftTimer = setInterval(() => { if (showCompose) localStorage.setItem(draftKey, JSON.stringify({ to, cc, bcc, subject, textBody, htmlBody: editorEl?.innerHTML || htmlBody, fromName })); }, 800);
 		observer = new IntersectionObserver((entries) => { if (entries.some((entry) => entry.isIntersecting)) loadMore(); }, { root: null, rootMargin: '240px' });
 		loadEmails().then(() => { if (sentinelEl) observer?.observe(sentinelEl); });
 
 		// Auto-refresh inbox/folder every 30s when tab is active
 		const pollInterval = setInterval(() => {
 			if (!document.hidden && !showCompose) {
-				loadEmails(true);
+				loadEmails(true); loadStorage();
 			}
 		}, 30000);
 
