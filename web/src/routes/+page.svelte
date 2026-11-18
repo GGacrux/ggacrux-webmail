@@ -630,12 +630,21 @@
 			{/each}
 		</div>
 		<div class="sidebar-footer">
-			{#if storage}<div class="storage-compact"><div><span>Mail DB</span><small>{formatBytes(storage.d1.usedBytes)} / 500 MB</small></div><div class="storage-track"><span class={storageTone(storage.d1.usedBytes, storage.d1.limitBytes)} style={"width:" + storagePercent(storage.d1.usedBytes, storage.d1.limitBytes) + "%"}></span></div><div><span>Attachments</span><small>{formatBytes(storage.r2.usedBytes)} / 10 GB</small></div><div class="storage-track"><span class={storageTone(storage.r2.usedBytes, storage.r2.limitBytes)} style={"width:" + storagePercent(storage.r2.usedBytes, storage.r2.limitBytes) + "%"}></span></div></div>{/if}
-			<button type="button" class="profile-trigger" on:click={() => (showProfile = true)} title="Profile & Appearance">
-				{#if profilePhoto}<img class="profile-avatar" src={profilePhoto} alt="Profile photo" />{:else}<span class="profile-avatar profile-initial">{avatarInitial}</span>{/if}
-				<span class="profile-label"><strong>{profileName || 'Profile'}</strong><small class="user-email" title={userEmail}>{userEmail}</small></span>
-			</button>
-			<a href="/cdn-cgi/access/logout" class="btn-logout">Log out</a>
+			{#if storage}
+				<div class="storage-compact">
+					<div class="storage-usage-label"><span>Mail DB</span><small>{formatBytes(storage.d1.usedBytes)} / 500 MB</small></div>
+					<div class="storage-track"><span class={storageTone(storage.d1.usedBytes, storage.d1.limitBytes)} style={"width:" + storagePercent(storage.d1.usedBytes, storage.d1.limitBytes) + "%"}></span></div>
+					<div class="storage-usage-label"><span>Attachments</span><small>{formatBytes(storage.r2.usedBytes)} / 10 GB</small></div>
+					<div class="storage-track"><span class={storageTone(storage.r2.usedBytes, storage.r2.limitBytes)} style={"width:" + storagePercent(storage.r2.usedBytes, storage.r2.limitBytes) + "%"}></span></div>
+				</div>
+			{/if}
+			<div class="sidebar-account-row">
+				<button type="button" class="profile-trigger" on:click={() => (showProfile = true)} title="Profile & Appearance">
+					{#if profilePhoto}<img class="profile-avatar" src={profilePhoto} alt="Profile photo" />{:else}<span class="profile-avatar profile-initial">{avatarInitial}</span>{/if}
+					<span class="profile-label"><strong>{profileName || 'Profile'}</strong><small class="user-email" title={userEmail}>{userEmail}</small></span>
+				</button>
+				<a href="/cdn-cgi/access/logout" class="btn-logout">Log out</a>
+			</div>
 		</div>
 	</aside>
 
@@ -663,11 +672,15 @@
 		</div>
 
 		{#if selectedIds.length > 0}
-			<div class="list-subbar"><span>{selectedIds.length} selected</span>
-				<button class="btn-link" on:click={() => bulkUpdate('read')}>Mark read</button>
-				<button class="btn-link" on:click={() => bulkUpdate('unread')}>Mark unread</button>
-				<button class="btn-link danger" on:click={() => bulkUpdate('trash')}>Trash</button>
-				<button class="btn-link danger" on:click={() => bulkUpdate('delete')}>Delete permanently</button>
+			<div class="list-subbar bulk-toolbar" aria-label="Bulk message actions">
+				<strong>{selectedIds.length} selected</strong>
+				<div class="icon-toolbar">
+					<button class="btn-icon" title="Mark as read" aria-label="Mark as read" on:click={() => bulkUpdate('read')}><svg viewBox="0 0 24 24"><path d="M4 12l5 5L20 6"/></svg></button>
+					<button class="btn-icon" title="Mark as unread" aria-label="Mark as unread" on:click={() => bulkUpdate('unread')}><svg viewBox="0 0 24 24"><path d="M4 6h16v12H4zM4 7l8 6 8-6"/></svg></button>
+					<button class="btn-icon" title="Move to Trash" aria-label="Move to Trash" on:click={() => bulkUpdate('trash')}><svg viewBox="0 0 24 24"><path d="M3 6h18M8 6V4h8v2m-10 0 1 14h10l1-14M10 10v6m4-6v6"/></svg></button>
+					<button class="btn-icon danger-icon" title="Delete permanently" aria-label="Delete permanently" on:click={() => bulkUpdate('delete')}><svg viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3m-9 0 1 13h10l1-13"/></svg></button>
+					<button class="btn-icon" title="Clear selection" aria-label="Clear selection" on:click={() => selectedIds = []}><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+				</div>
 			</div>
 		{/if}
 		{#if folder === 'inbox' && unreadCount > 0}
@@ -734,40 +747,22 @@
 			<div class="empty-state">Select a message to read</div>
 		{:else}
 			<div class="reading-toolbar">
-				<button class="btn-secondary mobile-back" on:click={() => (selectedEmail = null)}>
-					← Back
-				</button>
-				<div class="toolbar-actions">
-					{#each labels as label}<button class="btn-icon" style={"border-color:" + label.color} on:click={() => selectedEmail && toggleEmailTag(selectedEmail, label.name)}>{label.name}</button>{/each}
-					<button class="btn-primary" on:click={() => selectedEmail && openReply(selectedEmail)}>Reply</button>
-					<button class="btn-secondary" on:click={() => selectedEmail && openReplyAll(selectedEmail)}>Reply all</button>
-					<button class="btn-secondary" on:click={() => selectedEmail && openForward(selectedEmail)}>Forward</button>
-					<button class="btn-secondary" on:click={() => selectedEmail && toggleRead(selectedEmail)}>
-						Mark {selectedEmail.is_read === 1 ? 'Unread' : 'Read'}
-					</button>
+				<button class="btn-secondary mobile-back" on:click={() => (selectedEmail = null)} title="Back to messages">←</button>
+				<div class="icon-toolbar reading-actions">
+					<button class="btn-icon" title="Reply" aria-label="Reply" on:click={() => selectedEmail && openReply(selectedEmail)}><svg viewBox="0 0 24 24"><path d="M9 14 4 9l5-5M4 9h10a6 6 0 0 1 6 6v3"/></svg></button>
+					<button class="btn-icon" title="Reply all" aria-label="Reply all" on:click={() => selectedEmail && openReplyAll(selectedEmail)}><svg viewBox="0 0 24 24"><path d="m8 14-5-5 5-5M3 9h9a6 6 0 0 1 6 6v3M15 14l5-5-5-5"/></svg></button>
+					<button class="btn-icon" title="Forward" aria-label="Forward" on:click={() => selectedEmail && openForward(selectedEmail)}><svg viewBox="0 0 24 24"><path d="m15 4 5 5-5 5M20 9H10a6 6 0 0 0-6 6v3"/></svg></button>
+					<button class="btn-icon" title={selectedEmail.is_read === 1 ? 'Mark unread' : 'Mark read'} aria-label="Toggle read status" on:click={() => selectedEmail && toggleRead(selectedEmail)}><svg viewBox="0 0 24 24"><path d="M4 6h16v12H4zM4 7l8 6 8-6"/></svg></button>
 					{#if selectedEmail.folder !== 'trash'}
-						<button
-							class="btn-secondary"
-							on:click={() => selectedEmail && moveToFolder(selectedEmail.id, 'trash')}
-						>
-							Trash
-						</button>
+						<button class="btn-icon" title="Move to Trash" aria-label="Move to Trash" on:click={() => selectedEmail && moveToFolder(selectedEmail.id, 'trash')}><svg viewBox="0 0 24 24"><path d="M3 6h18M8 6V4h8v2m-10 0 1 14h10l1-14"/></svg></button>
 					{:else}
-						<button
-							class="btn-secondary"
-							on:click={() => selectedEmail && moveToFolder(selectedEmail.id, 'inbox')}
-						>
-							Restore
-						</button>
-						<button
-							class="btn-danger"
-							on:click={() => selectedEmail && permanentDelete(selectedEmail.id)}
-						>
-							Permanent Delete
-						</button>
+						<button class="btn-icon" title="Restore to Inbox" aria-label="Restore to Inbox" on:click={() => selectedEmail && moveToFolder(selectedEmail.id, 'inbox')}><svg viewBox="0 0 24 24"><path d="M4 12h16M12 4l8 8-8 8"/></svg></button>
+						<button class="btn-icon danger-icon" title="Delete permanently" aria-label="Delete permanently" on:click={() => selectedEmail && permanentDelete(selectedEmail.id)}><svg viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3m-9 0 1 13h10l1-13"/></svg></button>
 					{/if}
 				</div>
+				<label class="tag-selector"><span>Labels</span><select aria-label="Labels / Tags" on:change={(event) => selectedEmail && toggleEmailTag(selectedEmail, (event.currentTarget as HTMLSelectElement).value)}><option value="">Add label…</option>{#each labels as label}<option value={label.name}>{label.name}</option>{/each}</select></label>
 			</div>
+			<header class="subject-header">{selectedEmail.subject || '(No Subject)'}</header>
 
 			<div class="thread-container">
 				{#each threadMessages.length ? threadMessages : [selectedEmail] as message, index (message.id)}
@@ -775,7 +770,7 @@
 						<summary><strong>{message.sender_name || message.sender_email}</strong><span>{formatDate(message.created_at)}</span><span>{message.subject || '(No Subject)'}</span></summary>
 						<div class="meta-grid"><div><strong>From:</strong> {message.sender_email}</div><div><strong>To:</strong> {message.recipient_email}</div></div>
 						{#if message.attachments?.length}<div class="attachments-bar">{#each message.attachments as att}<a class="attachment-chip" href="/api/attachments/{att.id}" download={att.filename}>📎 {att.filename} ({formatBytes(att.size_bytes)})</a>{/each}</div>{:else if message.id === selectedEmail.id && attachments.length}<div class="attachments-bar">{#each attachments as att}<a class="attachment-chip" href="/api/attachments/{att.id}" download={att.filename}>📎 {att.filename} ({formatBytes(att.size_bytes)})</a>{/each}</div>{/if}
-						{#if message.html_body}<iframe class="thread-frame" title="Email content" sandbox="allow-popups allow-popups-to-escape-sandbox" srcdoc={buildSandboxedEmailHtml(message.html_body)}></iframe>{:else}<pre class="plain-body">{message.text_body || '(Empty message)'}</pre>{/if}
+						{#if message.html_body}<iframe class="thread-frame" title="Email content" sandbox="allow-popups allow-popups-to-escape-sandbox allow-same-origin" srcdoc={buildSandboxedEmailHtml(message.html_body)} on:load={resizeEmailFrame}></iframe>{:else}<pre class="plain-body">{message.text_body || '(Empty message)'}</pre>{/if}
 					</details>
 				{/each}
 			</div>
