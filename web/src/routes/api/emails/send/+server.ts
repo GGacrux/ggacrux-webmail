@@ -18,11 +18,6 @@ interface SendPayload {
 interface UploadFile { file: File; filename: string; contentType: string; size: number; }
 
 const MAX_ATTACHMENTS = 10 * 1024 * 1024;
-const BIDI_CONTROL_CHARS = /[\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069]/g;
-
-function stripBidiControls(value: string): string {
-	return value.replace(BIDI_CONTROL_CHARS, '');
-}
 const recipients = (value: string | string[] | undefined): string[] =>
 	(value ? (Array.isArray(value) ? value : value.split(',')) : [])
 		.map((address) => address.trim()).filter(Boolean);
@@ -125,9 +120,9 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	if (uploads.length && !bucket) throw error(503, 'R2 attachment storage is not enabled');
 
 	const senderName = (payload.fromName || senderEmail.split('@')[0]).trim().replace(/[\r\n<>]/g, '').slice(0, 100);
-	const cleanText = stripBidiControls(payload.text || '');
-	const htmlBody = payload.html ? sanitizeHtml(payload.html) : `<div style="font-family:sans-serif;line-height:1.5;white-space:pre-wrap">${cleanText.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>`;
-	const textBody = cleanText.trim() ? cleanText : htmlToText(htmlBody);
+	const rawText = payload.text || '';
+	const htmlBody = payload.html ? sanitizeHtml(payload.html) : `<div style="font-family:sans-serif;line-height:1.5;white-space:pre-wrap">${rawText.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>`;
+	const textBody = rawText.trim() ? rawText : htmlToText(htmlBody);
 	const headers: Record<string, string> = {};
 	let updatedReferences: string | null = null;
 	if (payload.inReplyTo) {
