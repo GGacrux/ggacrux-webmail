@@ -42,7 +42,7 @@ function sanitizeHtml(input: string): string {
 		const value = safeCssValue(property, declaration.slice(colon + 1));
 		return value ? property + ':' + value : '';
 	}).filter(Boolean).join(';');
-	let html = stripBidiControls(input).replace(/<!--[\s\S]*?-->/g, '').replace(blocked, '').replace(blockedSingle, '');
+	let html = input.replace(/<!--[\s\S]*?-->/g, '').replace(blocked, '').replace(blockedSingle, '');
 	html = html.replace(/<\/?([a-z][\w:-]*)\b([^>]*)>/gi, (tag, rawName: string, rawAttributes: string) => {
 		const name = rawName.toLowerCase();
 		if (!allowedTags.has(name)) return '';
