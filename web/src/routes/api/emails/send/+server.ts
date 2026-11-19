@@ -125,8 +125,8 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	if (uploads.length && !bucket) throw error(503, 'R2 attachment storage is not enabled');
 
 	const senderName = (payload.fromName || senderEmail.split('@')[0]).trim().replace(/[\r\n<>]/g, '').slice(0, 100);
-	const htmlBody = payload.html ? sanitizeHtml(payload.html) : `<div style="font-family:sans-serif;line-height:1.5;white-space:pre-wrap">${(payload.text || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>`;
 	const cleanText = stripBidiControls(payload.text || '');
+	const htmlBody = payload.html ? sanitizeHtml(payload.html) : `<div style="font-family:sans-serif;line-height:1.5;white-space:pre-wrap">${cleanText.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>`;
 	const textBody = cleanText.trim() ? cleanText : htmlToText(htmlBody);
 	const headers: Record<string, string> = {};
 	let updatedReferences: string | null = null;
