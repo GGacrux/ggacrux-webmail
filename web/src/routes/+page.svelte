@@ -505,8 +505,29 @@
 		}
 		updateVisualBody();
 	}
-	function updateVisualBody() { if (editorEl) { htmlBody = editorEl.innerHTML; textBody = editorEl.innerText; } }
+	function enforceEditorLtr(target: HTMLDivElement | undefined) {
+		if (!target) return;
+		target.setAttribute('dir', 'ltr');
+		target.style.direction = 'ltr';
+		target.style.unicodeBidi = 'normal';
+		target.style.textAlign = 'left';
+		// Restored drafts and saved signatures can contain nested RTL/override markup.
+		// Remove those overrides so newly typed characters inherit the editor's LTR flow.
+		target.querySelectorAll<HTMLElement>('[dir], [style]').forEach((element) => {
+			element.removeAttribute('dir');
+			element.style.removeProperty('direction');
+			element.style.removeProperty('unicode-bidi');
+		});
+	}
+	function updateVisualBody() {
+		if (editorEl) {
+			enforceEditorLtr(editorEl);
+			htmlBody = editorEl.innerHTML;
+			textBody = editorEl.innerText;
+		}
+	}
 	function updateSignature() {
+		enforceEditorLtr(signatureEditorEl);
 		if (signatureEditorEl) {
 			signatureHtml = signatureEditorEl.innerHTML;
 			localStorage.setItem('ggacrux_profile', JSON.stringify({ displayName: profileName, photo: profilePhoto, signatureHtml, theme: selectedTheme }));
@@ -1012,7 +1033,7 @@
 						<button type="button" class="btn-icon" title="Clear formatting" aria-label="Clear formatting" on:click={() => formatCommand('removeFormat')}><svg viewBox="0 0 24 24"><path d="m4 7 4-4 12 12-4 4zM3 21h18"/></svg></button>
 						<button type="button" class="btn-icon html-toggle" class:active-filter={htmlMode} title="Toggle HTML source" aria-label="Toggle HTML source" on:click={() => { if (!htmlMode) updateVisualBody(); htmlMode = !htmlMode; }}>&lt;&gt;</button>
 					</div>
-					{#if !htmlMode}<div bind:this={editorEl} class="rich-editor" contenteditable="true" dir="ltr" role="textbox" aria-label="Message body" aria-multiline="true" on:input={updateVisualBody} on:paste={handleEditorPaste}>{@html htmlBody}</div>{:else}<textarea class="html-source" rows="12" bind:value={htmlBody} on:input={() => textBody = htmlBody.replace(/<[^>]*>/g, ' ')}></textarea>{/if}
+					{#if !htmlMode}<div bind:this={editorEl} class="rich-editor" contenteditable="true" dir="ltr" role="textbox" aria-label="Message body" aria-multiline="true" on:focus={() => enforceEditorLtr(editorEl)} on:input={updateVisualBody} on:paste={handleEditorPaste}>{@html htmlBody}</div>{:else}<textarea class="html-source" rows="12" bind:value={htmlBody} on:input={() => textBody = htmlBody.replace(/<[^>]*>/g, ' ')}></textarea>{/if}
 				</div>
 				<div class="form-row"><label for="attachments-picker">Attachments (10 MB total)</label><input id="attachments-picker" type="file" multiple on:change={handleFiles} /><div class="file-chips">{#each attachmentFiles as file, index}<span class="attachment-chip">{file.name} · {formatBytes(file.size)} <button type="button" aria-label="Remove {file.name}" on:click={() => removeFile(index)}>×</button></span>{/each}</div>{#if attachmentError}<div class="error-banner">{attachmentError}</div>{/if}</div>
 
@@ -1051,7 +1072,7 @@
 					<button type="button" class="btn-icon" title="Insert link" aria-label="Insert link" on:click={() => runEditorCommand(signatureEditorEl,'createLink')}><svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.1 0l3-3a5 5 0 0 0-7.1-7.1l-1.7 1.7M14 11a5 5 0 0 0-7.1 0l-3 3A5 5 0 0 0 11 21.1l1.7-1.7"/></svg></button>
 					<button type="button" class="btn-icon" title="Clear formatting" aria-label="Clear formatting" on:click={() => runEditorCommand(signatureEditorEl,'removeFormat')}><svg viewBox="0 0 24 24"><path d="m4 7 4-4 12 12-4 4zM3 21h18"/></svg></button>
 				</div>
-				<div id="profile-signature-editor" bind:this={signatureEditorEl} class="rich-editor signature-editor" contenteditable="true" role="textbox" aria-label="Rich text email signature" aria-multiline="true" on:input={updateSignature}>{@html signatureHtml}</div>
+				<div id="profile-signature-editor" bind:this={signatureEditorEl} class="rich-editor signature-editor" contenteditable="true" dir="ltr" role="textbox" aria-label="Rich text email signature" aria-multiline="true" on:focus={() => enforceEditorLtr(signatureEditorEl)} on:input={updateSignature}>{@html signatureHtml}</div>
 			</div>
 			<div class="form-row"><span class="field-label">Theme</span><div class="theme-options">
 				<button type="button" class:theme-active={selectedTheme === 'slate'} on:click={() => changeTheme('slate')}>Slate Light</button>
@@ -1580,7 +1601,7 @@
 		.profile-avatar { width:30px; height:30px; flex-basis:30px; }
 	}
 
-	.smart-views,.label-nav{display:flex;flex-direction:column;gap:3px;padding:4px 2px 10px;border-bottom:1px solid #334155}.smart-views strong,.label-nav .quick-links-heading{color:#e2e8f0;font-size:12px;padding:3px 8px}.smart-views button,.label-nav>button{display:flex;align-items:center;gap:8px;text-align:left;border:0;border-radius:5px;background:transparent;color:#cbd5e1;padding:7px 9px;cursor:pointer;font-size:12px;overflow:hidden;text-overflow:ellipsis}.smart-views button:hover,.label-nav>button:hover,.smart-views button.active,.label-nav>button.active{background:#334155;color:#fff}.label-dot{width:8px;height:8px;border-radius:50%;flex:0 0 8px}.storage-compact{width:100%;display:grid;gap:4px;color:#cbd5e1;font-size:10px}.storage-compact>div:not(.storage-track){display:flex;justify-content:space-between;gap:5px}.storage-compact small{color:#94a3b8;font-size:9px;white-space:nowrap}.storage-track{height:5px;background:#334155;border-radius:8px;overflow:hidden;width:100%}.storage-track span{display:block;height:100%;background:#38bdf8;border-radius:8px}.storage-track span.warning{background:#f59e0b}.storage-track span.danger{background:#ef4444}.tag-pills{display:flex;gap:4px;overflow:hidden}.tag-pill{font-size:10px;color:#fff;border-radius:10px;padding:2px 7px;white-space:nowrap}.thread-container{flex:1;overflow-y:auto;padding:14px;display:grid;align-content:start;gap:10px}.thread-card{border:1px solid var(--border-color);border-radius:8px;background:var(--bg-surface);overflow:hidden}.thread-card summary{display:flex;gap:12px;align-items:center;padding:12px;cursor:pointer;font-size:12px;color:var(--text-secondary)}.thread-card summary strong{color:var(--text-primary)}.thread-card summary span:last-child{margin-left:auto;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:40%}.thread-card .meta-grid{padding:0 12px 10px}.thread-frame{width:100%;min-height:240px;border:0;background:#fff}.locked-field{background:#e2e8f0!important;color:#64748b!important;cursor:not-allowed!important}.compose-mode,.format-toolbar,.file-chips{display:flex;flex-wrap:wrap;gap:5px;margin:5px 0}.rich-editor,.html-source{width:100%;min-height:220px;padding:10px;border:1px solid #cbd5e1;border-radius:6px;background:#fff;color:#0f172a;font:14px/1.5 sans-serif;overflow:auto}.rich-editor{direction:ltr;unicode-bidi:normal;text-align:left}.rich-editor:focus{outline:2px solid #60a5fa}.file-chips .attachment-chip button{border:0;background:transparent;cursor:pointer;font-size:16px}.settings-storage{margin-top:18px;padding:12px;border:1px solid var(--border-color);border-radius:8px}.settings-storage p{font-size:12px;color:var(--text-secondary)}
+	.smart-views,.label-nav{display:flex;flex-direction:column;gap:3px;padding:4px 2px 10px;border-bottom:1px solid #334155}.smart-views strong,.label-nav .quick-links-heading{color:#e2e8f0;font-size:12px;padding:3px 8px}.smart-views button,.label-nav>button{display:flex;align-items:center;gap:8px;text-align:left;border:0;border-radius:5px;background:transparent;color:#cbd5e1;padding:7px 9px;cursor:pointer;font-size:12px;overflow:hidden;text-overflow:ellipsis}.smart-views button:hover,.label-nav>button:hover,.smart-views button.active,.label-nav>button.active{background:#334155;color:#fff}.label-dot{width:8px;height:8px;border-radius:50%;flex:0 0 8px}.storage-compact{width:100%;display:grid;gap:4px;color:#cbd5e1;font-size:10px}.storage-compact>div:not(.storage-track){display:flex;justify-content:space-between;gap:5px}.storage-compact small{color:#94a3b8;font-size:9px;white-space:nowrap}.storage-track{height:5px;background:#334155;border-radius:8px;overflow:hidden;width:100%}.storage-track span{display:block;height:100%;background:#38bdf8;border-radius:8px}.storage-track span.warning{background:#f59e0b}.storage-track span.danger{background:#ef4444}.tag-pills{display:flex;gap:4px;overflow:hidden}.tag-pill{font-size:10px;color:#fff;border-radius:10px;padding:2px 7px;white-space:nowrap}.thread-container{flex:1;overflow-y:auto;padding:14px;display:grid;align-content:start;gap:10px}.thread-card{border:1px solid var(--border-color);border-radius:8px;background:var(--bg-surface);overflow:hidden}.thread-card summary{display:flex;gap:12px;align-items:center;padding:12px;cursor:pointer;font-size:12px;color:var(--text-secondary)}.thread-card summary strong{color:var(--text-primary)}.thread-card summary span:last-child{margin-left:auto;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:40%}.thread-card .meta-grid{padding:0 12px 10px}.thread-frame{width:100%;min-height:240px;border:0;background:#fff}.locked-field{background:#e2e8f0!important;color:#64748b!important;cursor:not-allowed!important}.compose-mode,.format-toolbar,.file-chips{display:flex;flex-wrap:wrap;gap:5px;margin:5px 0}.rich-editor,.html-source{width:100%;min-height:220px;padding:10px;border:1px solid #cbd5e1;border-radius:6px;background:#fff;color:#0f172a;font:14px/1.5 sans-serif;overflow:auto}.rich-editor,.rich-editor *{direction:ltr!important;unicode-bidi:normal!important;text-align:left}.rich-editor:focus{outline:2px solid #60a5fa}.file-chips .attachment-chip button{border:0;background:transparent;cursor:pointer;font-size:16px}.settings-storage{margin-top:18px;padding:12px;border:1px solid var(--border-color);border-radius:8px}.settings-storage p{font-size:12px;color:var(--text-secondary)}
 
 
 	/* Unified one-line icon toolbars and resilient reading pane */
