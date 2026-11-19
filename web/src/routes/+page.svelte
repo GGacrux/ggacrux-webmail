@@ -491,9 +491,11 @@
 			parsed.body.querySelectorAll('script,style,iframe,object,embed,form,svg,math').forEach((node) => node.remove());
 			parsed.body.querySelectorAll('*').forEach((node) => {
 				node.removeAttribute('dir');
-				node.style.removeProperty('direction');
-				node.style.removeProperty('unicode-bidi');
-				if (!node.getAttribute('style')?.trim()) node.removeAttribute('style');
+				const safeStyle = (node.getAttribute('style') || '').split(';')
+					.filter((rule) => !/^\\s*(direction|unicode-bidi)\\s*:/i.test(rule))
+					.join(';').trim();
+				if (safeStyle) node.setAttribute('style', safeStyle);
+				else node.removeAttribute('style');
 				if (node.tagName === 'BDO' || node.tagName === 'BDI') node.replaceWith(...Array.from(node.childNodes));
 			});
 			const walker = parsed.createTreeWalker(parsed.body, NodeFilter.SHOW_TEXT);
