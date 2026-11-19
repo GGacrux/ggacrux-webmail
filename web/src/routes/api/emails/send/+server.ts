@@ -18,7 +18,7 @@ interface SendPayload {
 interface UploadFile { file: File; filename: string; contentType: string; size: number; }
 
 const MAX_ATTACHMENTS = 10 * 1024 * 1024;
-const BIDI_CONTROL_CHARS = /[\\u061C\\u200E\\u200F\\u202A-\\u202E\\u2066-\\u2069]/g;
+const BIDI_CONTROL_CHARS = /[\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069]/g;
 
 function stripBidiControls(value: string): string {
 	return value.replace(BIDI_CONTROL_CHARS, '');
