@@ -477,7 +477,7 @@
 		if (target === signatureEditorEl && signatureEditorEl) updateSignature();
 	}
 	function formatCommand(command: string, value?: string) { runEditorCommand(editorEl, command, value); }
-	const BIDI_CONTROL_CHARS = /[\\u061C\\u200E\\u200F\\u202A-\\u202E\\u2066-\\u2069]/g;
+	const BIDI_CONTROL_CHARS = /[\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069]/g;
 	function stripBidiControls(value: string) { return value.replace(BIDI_CONTROL_CHARS, ''); }
 	function handleEditorPaste(event: ClipboardEvent) {
 		event.preventDefault();
@@ -492,7 +492,7 @@
 			parsed.body.querySelectorAll('*').forEach((node) => {
 				node.removeAttribute('dir');
 				const safeStyle = (node.getAttribute('style') || '').split(';')
-					.filter((rule) => !/^\\s*(direction|unicode-bidi)\\s*:/i.test(rule))
+					.filter((rule) => !/^\s*(direction|unicode-bidi)\s*:/i.test(rule))
 					.join(';').trim();
 				if (safeStyle) node.setAttribute('style', safeStyle);
 				else node.removeAttribute('style');
@@ -505,7 +505,7 @@
 			}
 			insertion = parsed.body.innerHTML;
 		} else {
-			insertion = pastedText.split(/\\r?\\n/).map(escapeHtml).join('<br>');
+			insertion = pastedText.split(/\r?\n/).map(escapeHtml).join('<br>');
 		}
 		editorEl.focus();
 		document.execCommand('insertHTML', false, insertion);
