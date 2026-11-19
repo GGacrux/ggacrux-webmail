@@ -492,7 +492,7 @@
 			const template = document.createElement('template');
 			template.innerHTML = cleanHtml;
 			const walker = document.createTreeWalker(template.content, NodeFilter.SHOW_TEXT);
-			const bidiControls = /[\\u061c\\u200e\\u200f\\u202a-\\u202e\\u2066-\\u2069]/g;
+			const bidiControls = /[\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/g;
 			while (walker.nextNode()) {
 				const node = walker.currentNode;
 				node.textContent = (node.textContent || '').replace(bidiControls, '');
@@ -500,7 +500,7 @@
 			document.execCommand('insertHTML', false, template.innerHTML);
 		} else {
 			const plainText = event.clipboardData.getData('text/plain')
-				.replace(/[\\u061c\\u200e\\u200f\\u202a-\\u202e\\u2066-\\u2069]/g, '');
+				.replace(/[\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, '');
 			document.execCommand('insertText', false, plainText);
 		}
 		updateVisualBody();
